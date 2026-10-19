@@ -1,0 +1,110 @@
+# Phomemo Label Studio
+
+Application de bureau (Python + PyQt6) pour concevoir et imprimer des étiquettes thermiques
+sur une **Phomemo PM-241-BT** sous **Linux Mint**, en TSPL (ou ZPL), **sans CUPS**.
+
+## Fonctions
+
+- **Connexion** : Bluetooth RFCOMM (sockets standard, adresse MAC), USB (`/dev/usb/lp0`), port série (`/dev/ttyUSB0`, `/dev/rfcomm0`…) ; bouton *Tester la connexion* (statut + modèle) et *Auto-test* (SELFTEST).
+- **Éditeur visuel** : aperçu fidèle, éléments déplaçables à la souris (flèches du clavier : 0,5 mm, avec Maj : 2 mm), ordre des calques, duplication, zoom (Ctrl + molette).
+- **Éléments** : texte (police, taille, gras/italique, alignement, multi-lignes), code-barres (Code 128, Code 39, EAN-13, EAN-8, UPC-A), QR code (4 niveaux de correction), images/logos (seuil, Floyd-Steinberg ou tramage de Bayer, inversion), rectangles et traits. Rotation 0/90/180/270° pour chacun.
+- **Format** : formats prédéfinis (100×150 mm, 50×30 mm…) ou libre, en **mm ou en points**, 203/300 dpi, gap / repère noir / continu, noirceur, vitesse, copies.
+- **Langages** : TSPL (par défaut) ou ZPL II, en deux modes :
+  - **Raster** (recommandé) : l'étiquette est envoyée en une image `BITMAP` → rendu identique à l'aperçu, accents et polices TrueType compris.
+  - **Natif** : `TEXT` / `BARCODE` / `QRCODE` / `BOX` (ZPL : `^A0` / `^B*` / `^BQ` / `^GB`) — très léger, mais limité aux polices internes de l'imprimante.
+- Panneau « Commandes générées » (ce qui sera réellement envoyé), export `.tspl` / `.zpl`, export PNG, projets `.label.json` (images incluses), modèles prêts à l'emploi.
+
+## Installation (Linux Mint 21/22)
+
+```bash
+sudo apt update
+sudo apt install python3-venv python3-pip bluez libxcb-cursor0 libxkbcommon-x11-0 fonts-dejavu-core fontconfig
+
+cd phomemo_label_studio
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+> `libxcb-cursor0` est indispensable à Qt ≥ 6.5 sous X11 (sinon : « Could not load the Qt platform plugin "xcb" »).
+> Utilisez le Python **du système** (`/usr/bin/python3`) : c'est lui qui est compilé avec le support Bluetooth (`socket.AF_BLUETOOTH`). Un Python installé via pyenv/conda peut ne pas l'avoir.
+> Pas besoin de PyBluez : il n'est plus maintenu et ne s'installe plus avec les Python récents.
+
+Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 -m venv --system-site-packages .venv`.
+
+## Lancer
+
+```bash
+./lancer.sh            # crée le venv au premier lancement, puis démarre l'application
+# ou
+.venv/bin/python main.py
+```
+
+## Connecter l'imprimante
+
+### Bluetooth (RFCOMM)
+
+1. Allumez l'imprimante, puis appairez-la **une fois** (Menu → Bluetooth, ou en ligne de commande) :
+   ```bash
+   bluetoothctl
+   power on
+   scan on            # repérez « PM-241-BT » et son adresse AA:BB:CC:DD:EE:FF
+   pair AA:BB:CC:DD:EE:FF
+   trust AA:BB:CC:DD:EE:FF
+   exit
+   ```
+   (Code PIN éventuel : `0000` ou `1234`.)
+2. Dans l'application → onglet **Connexion** → *Bluetooth* : l'appareil apparaît dans « Appareils appairés » (sinon saisissez la MAC), canal RFCOMM **1** par défaut.
+3. Fermez l'application mobile Phomemo et déconnectez le téléphone : l'imprimante n'accepte qu'un client à la fois.
+4. Cliquez sur **Tester la connexion**.
+
+Si la connexion est refusée alors que l'imprimante est allumée et appairée, essayez un autre canal (1 à 5) ; `sdptool browse AA:BB:CC:DD:EE:FF` (si disponible) liste le canal du service « Serial Port ». Variante équivalente : `sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF 1` puis mode *Port série* sur `/dev/rfcomm0`.
+
+### USB
+
+Branchez le câble ; le périphérique apparaît en `/dev/usb/lp0` (ou `/dev/ttyUSB0` / `/dev/ttyACM0` selon le mode de l'imprimante). Droits d'accès :
+
+```bash
+sudo usermod -aG lp,dialout $USER    # puis fermer/rouvrir la session
+```
+
+## Utilisation rapide
+
+1. Menu **Modèles** (bordereau 100×150, produit 50×30…) ou **Nouveau**, puis onglet **Étiquette** pour régler format, support (gap), noirceur.
+2. Ajoutez des éléments avec les boutons **＋** à gauche ; sélectionnez-les (clic sur l'aperçu ou dans la liste) pour modifier leurs propriétés à droite.
+3. Vérifiez le gap et le format correspondent à vos rouleaux, puis **🖨 Imprimer** (Ctrl+P).
+
+## Structure du projet
+
+```
+main.py                     point d'entrée
+lancer.sh                   lance l'appli (crée le venv au besoin)
+requirements.txt
+labelstudio/
+  models.py                 Element / LabelSettings / Label (+ JSON)
+  fonts.py                  résolution des polices TrueType (fontconfig)
+  imaging.py                N&B, tramage, rotation, encodage binaire des bitmaps
+  renderer.py               éléments -> bitmaps (aperçu ET impression raster) + géométrie native
+  tspl.py / zpl.py          générateurs de trames
+  printer.py                connexions Bluetooth RFCOMM / USB / série, test de statut
+  templates.py              modèles d'étiquettes
+  ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
+tests/test_core.py          25 tests unitaires (python -m unittest discover -s tests)
+```
+
+## Dépannage
+
+| Symptôme | Piste |
+|---|---|
+| `Connexion refusée` (Bluetooth) | Téléphone encore connecté, mauvais canal, imprimante éteinte |
+| `Permission refusée` (USB/série) | `sudo usermod -aG lp,dialout $USER` puis nouvelle session |
+| Étiquettes décalées / une étiquette blanche en plus | Lancer la calibration du rouleau sur l'imprimante ; vérifier *Support* et *Espacement* |
+| Impression trop claire / trop foncée | Onglet Étiquette → *Noirceur* |
+| Image inversée / tête en bas | Onglet Étiquette → *DIRECTION* 0 ↔ 1 |
+| Accents manquants en mode natif | Passer en mode **Raster** (polices internes limitées à CP1252) |
+| Le test ne renvoie pas de statut | Normal sur certains firmwares : la liaison est établie, l'impression fonctionne quand même |
+
+## Limites connues
+
+- Écrit et testé sans imprimante physique : les trames et l'interface sont vérifiées (tests + rendu), mais le comportement exact de votre PM-241-BT (canal RFCOMM, DIRECTION, réponse au statut) est à confirmer sur le matériel.
+- Si votre exemplaire n'expose pas de service Bluetooth « série » classique (certains modèles Phomemo sont BLE uniquement), utilisez l'USB.
+- En mode natif, les rotations 90/180/270° et le ZPL natif reposent sur les conventions TSC/Zebra : en cas de décalage, le mode raster est exact.

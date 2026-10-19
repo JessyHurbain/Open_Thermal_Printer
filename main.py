@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Point d'entrée : lance Phomemo Label Studio."""
+
+import sys
+
+from PyQt6.QtWidgets import QApplication
+
+from labelstudio.ui.main_window import MainWindow
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    app.setApplicationName("Phomemo Label Studio")
+    app.setStyle("Fusion")
+    app.setStyleSheet(
+        "QToolBar { spacing: 6px; padding: 4px; }"
+        "QPushButton { padding: 5px 10px; }"
+        "QDockWidget::title { padding: 5px; font-weight: 600; }"
+    )
+    window = MainWindow()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

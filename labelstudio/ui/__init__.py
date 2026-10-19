@@ -1,0 +1,1 @@
+"""Interface graphique PyQt6."""

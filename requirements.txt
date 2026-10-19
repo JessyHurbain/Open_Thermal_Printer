@@ -1,0 +1,5 @@
+PyQt6>=6.4
+Pillow>=10.1
+qrcode>=7.4
+python-barcode>=0.15
+pyserial>=3.5
