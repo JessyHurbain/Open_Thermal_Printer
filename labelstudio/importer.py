@@ -12,7 +12,12 @@ Les rectangles sont des tuples (x0, y0, x1, y1) en pixels de l'image de la page.
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
+from collections import Counter
 from dataclasses import dataclass
+from itertools import groupby
+from typing import Callable
 
 from PIL import Image
 
@@ -21,6 +26,8 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff")
 SUPPORTED_EXTS = PDF_EXTS + IMAGE_EXTS
 
 Rect = tuple[int, int, int, int]
+
+PREVIEW_DPI = 300  # résolution de la page affichée ; les rectangles de rognage sont exprimés dans ce repère
 
 
 class ImportError_(Exception):
@@ -38,12 +45,9 @@ class PageSource:
         low = path.lower()
         if low.endswith(PDF_EXTS):
             try:
-                import pymupdf  # PyMuPDF >= 1.24 ; l'ancien nom du module est « fitz »
-            except ImportError:
-                try:
-                    import fitz as pymupdf
-                except ImportError as exc:
-                    raise ImportError_("PyMuPDF n'est pas installé :  pip install pymupdf") from exc
+                import pymupdf  # PyMuPDF >= 1.24
+            except ImportError as exc:
+                raise ImportError_("PyMuPDF n'est pas installé :  pip install pymupdf") from exc
             try:
                 self._doc = pymupdf.open(path)
             except Exception as exc:
@@ -71,6 +75,35 @@ class PageSource:
         if self._image is not None:
             return self._image.copy()
         pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(dpi=dpi, alpha=False)
+        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+    @property
+    def is_pdf(self) -> bool:
+        return self._doc is not None
+
+    def page_text(self, page: int = 0) -> str:
+        """Texte du PDF (vide pour une image : pas d'OCR)."""
+        if not self._doc:
+            return ""
+        try:
+            return self._doc[max(0, min(page, self.page_count - 1))].get_text()
+        except Exception:
+            return ""
+
+    def render_region(self, page: int, rect: Rect, dpi: float) -> Image.Image:
+        """Région `rect` (repère PREVIEW_DPI) rendue *directement* à `dpi` : net, sans double rééchantillonnage.
+
+        Pour une image, on ne peut pas faire mieux que la découper.
+        """
+        if self._image is not None:
+            return self._image.crop(rect)
+        import pymupdf  # déjà chargé si le PDF a été ouvert
+
+        k = 72 / PREVIEW_DPI
+        clip = pymupdf.Rect(rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k)
+        zoom = dpi / 72  # une matrice accepte un facteur décimal (le paramètre `dpi` exige un entier)
+        pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(
+            matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False)
         return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
     def close(self) -> None:
@@ -166,20 +199,76 @@ def auto_crop(img: Image.Image) -> Rect:
 # ---------------------------------------------------------------- mise à l'échelle
 @dataclass
 class Placement:
-    image: Image.Image  # rogné (et éventuellement tourné), prêt à être posé
+    image: Image.Image  # rogné, tourné, à la résolution finale quand c'est possible
     x_mm: float
     y_mm: float
     width_mm: float
     height_mm: float
-    rotated: bool
+    rotated: bool  # tourné automatiquement de 90°
+    scale: float = 0.0  # mm par pixel de la page (repère PREVIEW_DPI)
+    turns: int = 0  # quarts de tour horaires appliqués au total
+    module_dots: int | None = None  # largeur de barre calée en points (None : pas de calage)
+
+
+# ---------------------------------------------------------------- calage des codes-barres
+def estimate_module_px(img: Image.Image, max_run: int = 80, min_runs: int = 30) -> float | None:
+    """Largeur de la barre étroite dominante (px), mesurée sur des lignes ET des colonnes échantillonnées.
+
+    Un code-barres produit des centaines de segments noirs de largeur 1×, 2×, 3×… le module :
+    la largeur la plus fréquente est donc le module. Renvoie None si le signal est trop faible.
+    """
+    mask = img.convert("L").point(lambda v: 255 if v < 128 else 0)
+    best: tuple[int, int] | None = None  # (nombre de segments au pic, largeur)
+    for m in (mask, mask.transpose(Image.Transpose.TRANSPOSE)):
+        w, h = m.size
+        data = m.tobytes()
+        step = max(1, h // 200)
+        counts: Counter[int] = Counter()
+        for y in range(0, h, step):
+            for value, group in groupby(data[y * w : (y + 1) * w]):
+                if value:
+                    n = sum(1 for _ in group)
+                    if 2 <= n <= max_run:
+                        counts[n] += 1
+        if sum(counts.values()) < min_runs:
+            continue
+        smooth = {n: counts[n - 1] + counts[n] + counts[n + 1] for n in range(2, max_run + 1)}
+        width = max(smooth, key=smooth.get)
+        if best is None or smooth[width] > best[0]:
+            best = (smooth[width], width)
+    return float(best[1]) if best else None
+
+
+def snap_scale(scale: float, module_px: float, dpi: int, max_w_mm: float, max_h_mm: float,
+               px_w: int, px_h: int) -> tuple[float, int | None]:
+    """Ajuste l'échelle (mm/px) pour que la barre étroite tombe sur un nombre entier de points.
+
+    Essaie d'abord l'entier supérieur (agrandissement ≤ 3 %, dans les marges), sinon l'inférieur
+    (réduction ≤ 22 %). Sinon laisse l'échelle telle quelle. Renvoie (échelle, module en points).
+    """
+    dots_per_px = scale * dpi / 25.4
+    ideal = module_px * dots_per_px
+    if ideal < 1:
+        return scale, None
+    for target in (int(ideal) + 1, int(ideal)):
+        if target < 1:
+            continue
+        ratio = target / ideal
+        new = scale * ratio
+        fits = px_w * new <= max_w_mm and px_h * new <= max_h_mm
+        if (target > ideal and ratio <= 1.03 and fits) or (target <= ideal and ratio >= 0.78):
+            return new, target
+    return scale, None
 
 
 def fit_to_label(crop: Image.Image, label_w_mm: float, label_h_mm: float, margin_mm: float = 2.0,
-                 auto_rotate: bool = True, extra_rotation: int = 0, align_top: bool = False) -> Placement:
+                 auto_rotate: bool = True, extra_rotation: int = 0, align_top: bool = False,
+                 module_px: float | None = None, dpi: int = 203) -> Placement:
     """Ajuste `crop` dans l'étiquette (sans déformation), centré, éventuellement tourné de 90°.
 
     `extra_rotation` : rotation manuelle horaire (multiple de 90°) appliquée d'abord.
     `auto_rotate`   : tourne de 90° si cela permet un agrandissement plus grand.
+    `module_px`     : largeur de barre étroite (px) → cale l'échelle sur un nombre entier de points.
     """
     img = crop
     turns = (extra_rotation // 90) % 4
@@ -195,11 +284,94 @@ def fit_to_label(crop: Image.Image, label_w_mm: float, label_h_mm: float, margin
         scale_turned = min(avail_w / turned.width, avail_h / turned.height)
         if scale_turned > scale * 1.02:  # au moins 2 % de mieux, sinon on ne tourne pas
             img, scale, rotated = turned, scale_turned, True
+            turns += 1
+
+    module_dots = None
+    if module_px:
+        # la mesure du module est indépendante de l'orientation (lignes et colonnes testées)
+        scale, module_dots = snap_scale(scale, module_px, dpi, label_w_mm - 1, label_h_mm - 1, img.width, img.height)
 
     w_mm, h_mm = img.width * scale, img.height * scale
     x = (label_w_mm - w_mm) / 2
     y = margin_mm if align_top else (label_h_mm - h_mm) / 2
-    return Placement(img, round(x, 2), round(y, 2), round(w_mm, 2), round(h_mm, 2), rotated)
+    return Placement(img, round(x, 2), round(y, 2), round(w_mm, 2), round(h_mm, 2), rotated, scale, turns % 4,
+                     module_dots)
+
+
+def build_placement(source: PageSource | None, page: int, page_img: Image.Image, rect: Rect, label_w_mm: float,
+                    label_h_mm: float, margin_mm: float, auto_rotate: bool, extra_rotation: int, dpi: int,
+                    optimize_barcodes: bool, module_cache: dict | None = None, cache_key=None) -> Placement:
+    """Placement final. Pour un PDF, la région est rendue directement à la résolution de l'imprimante."""
+    crop = page_img.crop(rect)
+    module_px = None
+    if optimize_barcodes:
+        key = (cache_key, rect)
+        if module_cache is not None and cache_key is not None and key in module_cache:
+            module_px = module_cache[key]
+        else:
+            module_px = estimate_module_px(crop)
+            if module_cache is not None and cache_key is not None:
+                module_cache[key] = module_px
+    place = fit_to_label(crop, label_w_mm, label_h_mm, margin_mm, auto_rotate, extra_rotation,
+                         module_px=module_px, dpi=dpi)
+    if source is None or not source.is_pdf:
+        return place
+
+    dots_per_px = place.scale * dpi / 25.4
+    region = source.render_region(page, rect, PREVIEW_DPI * dots_per_px)
+    for _ in range(place.turns):
+        region = region.transpose(Image.Transpose.ROTATE_270)
+    w_mm = region.width * 25.4 / dpi  # largeur exacte en points entiers : aucun rééchantillonnage ensuite
+    h_mm = region.height * 25.4 / dpi
+    x = (label_w_mm - w_mm) / 2
+    y = (label_h_mm - h_mm) / 2
+    return Placement(region, round(x, 3), round(y, 3), w_mm, h_mm, place.rotated, place.scale, place.turns,
+                     place.module_dots)
+
+
+# ---------------------------------------------------------------- reconnaissance du transporteur
+# Mots-clés recherchés dans le texte du PDF (ordre = ordre d'affichage). Comparaison sans accents ni casse.
+KNOWN_KEYWORDS = (
+    "mondial relay", "colissimo", "chronopost", "relais colis", "vinted go", "dpd", "gls", "ups", "dhl", "fedex",
+    "inpost", "boxtal", "la poste", "vinted", "leboncoin",
+)
+_PRETTY = {"ups": "UPS", "dpd": "DPD", "gls": "GLS", "dhl": "DHL"}
+
+
+def _normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", text.lower())
+
+
+def detect_keywords(text: str) -> list[str]:
+    """Transporteurs / plateformes repérés dans le texte d'un bordereau."""
+    norm = _normalize(text)
+    return [k for k in KNOWN_KEYWORDS if re.search(rf"\b{re.escape(k)}\b", norm)]
+
+
+def keywords_label(keywords: list[str]) -> str:
+    return " + ".join(_PRETTY.get(k, k.title()) for k in keywords)
+
+
+def match_preset(presets: dict, keywords: list[str], page_size: tuple[int, int], tolerance: float = 0.03) -> str | None:
+    """Préréglage correspondant au document : tous ses mots-clés présents et même format de page.
+
+    Le préréglage le plus spécifique (le plus de mots-clés) l'emporte. Un préréglage sans mots-clés
+    n'est jamais appliqué automatiquement.
+    """
+    ratio = page_size[0] / page_size[1]
+    best: tuple[int, str] | None = None
+    for name, preset in presets.items():
+        wanted = preset.get("match") or []
+        if not wanted or not set(wanted) <= set(keywords):
+            continue
+        saved_ratio = preset.get("ratio")
+        if saved_ratio and abs(saved_ratio - ratio) / saved_ratio > tolerance:
+            continue
+        if best is None or len(wanted) > best[0]:
+            best = (len(wanted), name)
+    return best[1] if best else None
 
 
 # ---------------------------------------------------------------- préréglages de rognage

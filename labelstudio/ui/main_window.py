@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         a_open = act("Ouvrir…", self.open_file, "Ctrl+O")
         a_save = act("Enregistrer", self.save_file, "Ctrl+S")
         a_saveas = act("Enregistrer sous…", lambda: self.save_file(as_new=True), "Ctrl+Shift+S")
-        a_import = act("Importer une étiquette Vinted / Leboncoin…", self.import_shipping, "Ctrl+I",
+        a_import = act("Importer des étiquettes Vinted / Leboncoin…", lambda: self.import_shipping(), "Ctrl+I",
                        "Rogner et imprimer un bordereau PDF ou une image")
         a_png = act("Exporter l'aperçu (PNG)…", self.export_png)
         a_cmd = act("Exporter les commandes brutes…", self.export_commands)
@@ -448,6 +448,7 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(True)
         w = Worker(fn, self)
         w.progress.connect(self.progress.setValue)
+        w.message.connect(self.log)
         w.succeeded.connect(on_ok)
         w.failed.connect(self._on_failed)
         w.finished.connect(self._on_worker_done)
@@ -510,10 +511,13 @@ class MainWindow(QMainWindow):
         self._run(lambda _p: printer.send_selftest(cfg, lang), "Envoi de l'auto-test…", ok)
 
     # ================================================================== import Vinted / Leboncoin
-    def import_shipping(self, path: str | None = None) -> None:
-        """Rogne un bordereau (PDF/image) et le place sur l'étiquette, puis imprime si demandé."""
-        dlg = ImportDialog(self.label.settings, path, self)
+    def import_shipping(self, paths: list[str] | None = None) -> None:
+        """Rogne un ou plusieurs bordereaux (PDF/images), puis charge ou imprime le résultat."""
+        dlg = ImportDialog(self.label.settings, paths, self)
         if dlg.exec() != QDialog.DialogCode.Accepted or dlg.element is None:
+            return
+        if dlg.print_now and len(dlg.jobs) > 1:  # impression par lot : l'éditeur n'est pas modifié
+            self.print_batch(dlg.jobs)
             return
         if dlg.replace:
             if not self._confirm_discard():
@@ -532,13 +536,52 @@ class MainWindow(QMainWindow):
         if dlg.print_now:
             QTimer.singleShot(0, self.print_label)
 
+    def print_batch(self, jobs: list) -> None:
+        """Imprime plusieurs étiquettes à la suite sur une seule connexion (confirmation avant envoi)."""
+        n = len(jobs)
+        r = QMessageBox.question(
+            self, "Imprimer le lot",
+            f"Envoyer {n} étiquettes à l'imprimante ?\n\nFormat : {jobs[0][1][0]:g} × {jobs[0][1][1]:g} mm, "
+            f"{self.label.settings.copies} exemplaire(s) chacune.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        cfg = self.conn_panel.config()
+        base = copy.deepcopy(self.label.settings)
+        builder = build_zpl if base.language == "zpl" else build_tspl
+
+        def frames():
+            for el, (w_mm, h_mm) in jobs:  # chaque trame est rendue juste avant son envoi
+                s = copy.deepcopy(base)
+                s.width_mm, s.height_mm = w_mm, h_mm
+                yield builder(Label(s, [el]))
+
+        def job(progress, message):
+            return printer.send_jobs(
+                cfg, frames(), progress, total=n,
+                on_job=lambda i, total: message(f"Étiquette {i}/{total}…"),
+            )
+
+        def ok(sent):
+            self.log(f"Lot terminé : {sent} étiquette(s) envoyée(s).")
+            self.conn_panel.set_status(f"Dernier lot : {sent} étiquette(s) OK", ok=True)
+
+        self._run(job, f"Impression de {n} étiquettes via {cfg['type']}…", ok)
+
     def dragEnterEvent(self, event) -> None:
-        urls = event.mimeData().urls()
-        if urls and urls[0].isLocalFile() and urls[0].toLocalFile().lower().endswith(importer.SUPPORTED_EXTS):
+        if self._dropped_files(event):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        self.import_shipping(event.mimeData().urls()[0].toLocalFile())
+        files = self._dropped_files(event)
+        if files:
+            self.import_shipping(files)
+
+    @staticmethod
+    def _dropped_files(event) -> list[str]:
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        return sorted(p for p in paths if p.lower().endswith(importer.SUPPORTED_EXTS))
 
     # ================================================================== divers
     def about(self) -> None:

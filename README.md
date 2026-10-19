@@ -40,16 +40,17 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 .venv/bin/python main.py
 ```
 
-## Imprimer une étiquette Vinted / Leboncoin
+## Imprimer des étiquettes Vinted / Leboncoin
 
-1. Téléchargez le bordereau (PDF) depuis Vinted ou Leboncoin.
-2. Dans l'application : **Fichier → Importer une étiquette Vinted / Leboncoin…** (Ctrl+I), ou **glissez le PDF sur la fenêtre**.
-3. L'étiquette est détectée automatiquement (cadre bleu). Sinon : cliquez sur un bloc orange, ou tracez un rectangle à la souris ; *Retirer les marges* resserre le cadre ; *↻ 90°* tourne.
+1. Téléchargez vos bordereaux (PDF) depuis Vinted ou Leboncoin.
+2. Dans l'application : **Fichier → Importer des étiquettes Vinted / Leboncoin…** (Ctrl+I), ou **glissez un ou plusieurs PDF sur la fenêtre**. Chaque page de chaque PDF devient une entrée de la file d'attente.
+3. Pour chaque entrée, l'étiquette est repérée automatiquement (cadre bleu). Sinon : cliquez sur un bloc orange, ou tracez un rectangle à la souris ; *Retirer les marges* resserre le cadre ; *↻ 90°* tourne.
 4. Choisissez le format de votre rouleau (100 × 150 mm par exemple) ; l'aperçu en bas montre exactement ce qui sortira.
-5. **Importer et imprimer** (ou *Remplacer* / *Ajouter* pour retoucher avant : ajouter un texte, un n° de commande…).
+5. **Importer et imprimer** : avec une seule entrée, elle part directement ; avec plusieurs, **« Imprimer les N étiquettes »** les envoie à la suite sur une seule connexion Bluetooth, après confirmation. *Remplacer* / *Ajouter* chargent l'étiquette sélectionnée dans l'éditeur pour la retoucher (ajouter un texte, un n° de commande…).
 
-Astuce : cliquez sur **Mémoriser…** une fois pour chaque transporteur (ex. « Vinted – Mondial Relay ») : les prochains PDF de même mise en page se rognent en un clic avec **Appliquer**.
-Si un code-barres semble trop clair ou trop gras, réglez *Noirceur*. Vérifiez toujours que le code-barres se scanne sur le premier tirage.
+**Reconnaissance du transporteur.** L'application lit le texte du PDF (Mondial Relay, Colissimo, Chronopost, Relais Colis, Vinted Go, DPD, GLS, UPS, DHL…, et Vinted / Leboncoin). Cliquez une fois sur **Mémoriser…** après avoir ajusté un rognage : il sera ensuite **appliqué automatiquement** à tous les PDF du même transporteur et du même format de page. Le message sous la liste dit ce qui a été reconnu et appliqué. *À toute la file* force un préréglage sur toutes les entrées. Les images (PNG, JPG) n'ont pas de texte : elles sont rognées automatiquement mais sans reconnaissance.
+
+**Netteté des codes-barres.** Pour un PDF, la zone rognée est rendue *directement* à la résolution de l'imprimante (pas de réduction après coup). Avec « Optimiser pour les codes-barres » (activé par défaut), l'échelle est ajustée pour que la barre la plus fine tombe sur un nombre entier de points (par exemple 3 pt) : au maximum +3 % dans les marges ou −22 %. Si aucun calage ne convient, l'étiquette est laissée à son échelle naturelle ; le message sous la case l'indique. Si un code semble trop clair ou trop gras, réglez *Noirceur*. Scannez toujours le code du premier tirage avant de coller.
 
 ## Connecter l'imprimante
 
@@ -98,10 +99,10 @@ labelstudio/
   renderer.py               éléments -> bitmaps (aperçu ET impression raster) + géométrie native
   tspl.py / zpl.py          générateurs de trames
   printer.py                connexions Bluetooth RFCOMM / USB / série, test de statut
-  importer.py               PDF/image -> détection de blocs, rognage, mise à l'échelle, préréglages
+  importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
-tests/                      39 tests unitaires (python -m unittest discover -s tests)
+tests/                      51 tests unitaires (python -m unittest discover -s tests)
 ```
 
 ## Dépannage

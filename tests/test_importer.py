@@ -141,5 +141,134 @@ class SourceTests(unittest.TestCase):
                 importer.PageSource(broken)
 
 
+def vector_barcode_pdf(path, module_mm=0.33, text="MONDIAL RELAY Vinted", pages=1):
+    """PDF A4 avec un cadre d'étiquette, du texte et un Code 128 vectoriel (barres exactes)."""
+    import pymupdf
+    from labelstudio.renderer import barcode_modules
+
+    bits, _ = barcode_modules("code128", "MR0123456789")
+    doc = pymupdf.open()
+    mod = module_mm * 72 / 25.4
+    for _ in range(pages):
+        page = doc.new_page(width=595, height=842)
+        page.draw_rect(pymupdf.Rect(40, 40, 300, 300), width=1)
+        page.insert_text((60, 100), text, fontsize=14)
+        for i, b in enumerate(bits):
+            if b == "1":
+                page.draw_rect(pymupdf.Rect(60 + i * mod, 120, 60 + (i + 1) * mod, 200), fill=(0, 0, 0), color=None)
+    doc.save(path)
+    doc.close()
+
+
+class ModuleSnapTests(unittest.TestCase):
+    def test_estimate_module_on_vector_barcode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "b.pdf")
+            vector_barcode_pdf(path)
+            src = importer.PageSource(path)
+            page = src.render(0)
+            m = importer.estimate_module_px(page.crop(importer.auto_crop(page)))
+            self.assertIsNotNone(m)
+            self.assertAlmostEqual(m, 0.33 / 25.4 * 300, delta=1.0)  # ≈ 3,9 px à 300 dpi
+            src.close()
+
+    def test_no_barcode_no_estimate(self):
+        self.assertIsNone(importer.estimate_module_px(Image.new("RGB", (300, 300), "white")))
+
+    def test_snap_prefers_integer_dots(self):
+        # 2,53 pt idéaux : l'entier inférieur (2) est à -21 %, accepté ; jamais d'agrandissement hors marges
+        scale = 96 / 1000  # mm/px
+        module_px = 2.53 / (scale * 203 / 25.4)
+        new, dots = importer.snap_scale(scale, module_px, 203, 99, 149, 1000, 1500)
+        self.assertEqual(dots, 2)
+        self.assertLess(new, scale)
+        self.assertAlmostEqual(module_px * new * 203 / 25.4, 2.0, places=3)
+
+    def test_snap_small_growth_allowed_when_it_fits(self):
+        scale = 50 / 1000
+        module_px = 2.95 / (scale * 203 / 25.4)  # 2,95 pt → 3 pt = +1,7 %
+        new, dots = importer.snap_scale(scale, module_px, 203, 99, 149, 1000, 1000)
+        self.assertEqual(dots, 3)
+        self.assertGreater(new, scale)
+
+    def test_snap_gives_up_instead_of_distorting(self):
+        scale = 96 / 1000
+        module_px = 2.9 / (scale * 203 / 25.4)  # 3 pt = +3,4 % mais ne tient pas ; 2 pt = -31 %
+        new, dots = importer.snap_scale(scale, module_px, 203, 96.5, 149, 1000, 1500)
+        self.assertIsNone(dots)
+        self.assertEqual(new, scale)
+
+    def test_pdf_is_rendered_at_final_resolution(self):
+        """Largeur finale = nombre entier de points ; le rendu direct évite un second rééchantillonnage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "b.pdf")
+            vector_barcode_pdf(path)
+            src = importer.PageSource(path)
+            page = src.render(0)
+            rect = importer.auto_crop(page)
+            pl = importer.build_placement(src, 0, page, rect, 100, 150, 2, True, 0, 203, True, {}, cache_key="k")
+            self.assertAlmostEqual(pl.width_mm * 203 / 25.4, pl.image.width, delta=0.01)
+            self.assertLess(pl.image.width, page.crop(rect).width)  # bien rendu à 203 dpi, pas recadré à 300
+            src.close()
+
+
+class CarrierTests(unittest.TestCase):
+    def test_keywords_ignore_case_and_accents(self):
+        kws = importer.detect_keywords("Étiquette MONDIAL  RELAY – envoi Vinted ; Colissimo")
+        self.assertEqual(kws, ["mondial relay", "colissimo", "vinted"])
+
+    def test_no_false_positive_inside_words(self):
+        self.assertEqual(importer.detect_keywords("groups updated gloss"), [])
+
+    def test_label(self):
+        self.assertEqual(importer.keywords_label(["mondial relay", "vinted"]), "Mondial Relay + Vinted")
+        self.assertEqual(importer.keywords_label(["dpd"]), "DPD")
+
+    def test_match_preset_requires_all_keywords_and_same_page_ratio(self):
+        a4 = (1240, 1754)
+        presets = {
+            "MR": {"rect": [0, 0, 1, 1], "match": ["mondial relay", "vinted"], "ratio": round(1240 / 1754, 4)},
+            "MR seul": {"rect": [0, 0, 1, 1], "match": ["mondial relay"], "ratio": round(1240 / 1754, 4)},
+            "Sans mots-clés": {"rect": [0, 0, 1, 1]},
+        }
+        self.assertEqual(importer.match_preset(presets, ["mondial relay", "vinted"], a4), "MR")  # le plus spécifique
+        self.assertEqual(importer.match_preset(presets, ["mondial relay"], a4), "MR seul")
+        self.assertIsNone(importer.match_preset(presets, ["colissimo"], a4))
+        self.assertIsNone(importer.match_preset(presets, ["mondial relay"], (1754, 1240)))  # page paysage
+        self.assertIsNone(importer.match_preset({"X": {"rect": [0, 0, 1, 1]}}, ["mondial relay"], a4))
+
+    def test_pdf_text_is_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "b.pdf")
+            vector_barcode_pdf(path, text="COLISSIMO Leboncoin")
+            src = importer.PageSource(path)
+            self.assertEqual(importer.detect_keywords(src.page_text(0)), ["colissimo", "leboncoin"])
+            src.close()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "i.png")
+            page_with_label().save(path)
+            self.assertEqual(importer.PageSource(path).page_text(0), "")  # image : pas de texte
+
+
+class BatchTests(unittest.TestCase):
+    def test_send_jobs_one_connection_all_frames_in_order(self):
+        from labelstudio import printer
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            path = tmp.name
+        try:
+            seen = []
+            frames = (bytes([65 + i]) * 700 for i in range(3))  # générateur : produit à la volée
+            n = printer.send_jobs({"type": "usb", "path": path}, frames, progress=seen.append,
+                                  on_job=lambda i, t: seen.append(("job", i, t)), pause=0.01, total=3)
+            self.assertEqual(n, 3)
+            with open(path, "rb") as fh:
+                self.assertEqual(fh.read(), b"A" * 700 + b"B" * 700 + b"C" * 700)
+            self.assertIn(("job", 3, 3), seen)
+            self.assertEqual(seen[-1], 100)
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

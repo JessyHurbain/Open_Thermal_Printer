@@ -50,14 +50,14 @@ class Connection(ABC):
     def read(self, size: int = 64, timeout: float = 1.0) -> bytes:
         """Lit jusqu'à `size` octets ; renvoie b'' si rien n'arrive avant `timeout`."""
 
-    def send(self, data: bytes, progress: ProgressCb | None = None) -> None:
+    def send(self, data: bytes, progress: ProgressCb | None = None, settle: float = 0.4) -> None:
         total = len(data) or 1
         for pos in range(0, len(data), CHUNK_SIZE):
             self._write(data[pos : pos + CHUNK_SIZE])
             if progress:
                 progress(min(100, int((pos + CHUNK_SIZE) * 100 / total)))
             time.sleep(CHUNK_DELAY)
-        time.sleep(0.4)  # laisse l'imprimante vider son tampon avant la fermeture
+        time.sleep(settle)  # laisse l'imprimante vider son tampon (avant fermeture ou étiquette suivante)
         if progress:
             progress(100)
 
@@ -305,6 +305,26 @@ def test_connection(cfg: dict, language: str = "tspl") -> TestResult:
 def send_job(cfg: dict, data: bytes, progress: ProgressCb | None = None) -> None:
     with make_connection(cfg) as conn:
         conn.send(data, progress)
+
+
+def send_jobs(cfg: dict, jobs, progress: ProgressCb | None = None,
+              on_job: Callable[[int, int], None] | None = None, pause: float = 1.0, total: int | None = None) -> int:
+    """Envoie plusieurs travaux à la suite sur UNE SEULE connexion (pas de reconnexion Bluetooth entre
+    les étiquettes). `jobs` peut être un itérateur : chaque trame est produite juste avant son envoi,
+    ce qui permet de rendre la suivante pendant que l'imprimante finit la précédente.
+    Renvoie le nombre d'étiquettes envoyées.
+    """
+    jobs = list(jobs) if isinstance(jobs, (list, tuple)) else jobs
+    total = total or (len(jobs) if hasattr(jobs, "__len__") else 0)
+    sent = 0
+    with make_connection(cfg) as conn:
+        for index, data in enumerate(jobs):
+            if on_job:
+                on_job(index + 1, total)
+            share = (lambda pct, i=index: progress(int((i * 100 + pct) / max(1, total)))) if progress and total else None
+            conn.send(data, share, settle=pause)
+            sent += 1
+    return sent
 
 
 def send_selftest(cfg: dict, language: str = "tspl") -> None:
