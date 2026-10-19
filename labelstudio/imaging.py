@@ -38,6 +38,17 @@ def encode_image_file(path: str, max_side: int = 2000) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def encode_pil_image(im: Image.Image, max_side: int = 3000) -> str:
+    """Image Pillow -> PNG base64 (pour stocker un rognage dans un élément)."""
+    im = _flatten_alpha(im)
+    if max(im.size) > max_side:
+        im = im.copy()
+        im.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def decode_image(b64: str) -> Image.Image | None:
     if not b64:
         return None

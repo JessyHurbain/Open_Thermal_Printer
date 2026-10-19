@@ -3,3 +3,4 @@ Pillow>=10.1
 qrcode>=7.4
 python-barcode>=0.15
 pyserial>=3.5
+pymupdf>=1.24

@@ -9,11 +9,11 @@ from datetime import datetime
 from PyQt6.QtCore import QSettings, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QHBoxLayout, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
+    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
 )
 
-from .. import __version__, printer, templates
+from .. import __version__, importer, printer, templates
 from ..imaging import encode_image_file
 from ..models import KIND_LABELS, Element, Label
 from ..renderer import render_label, warnings_for
@@ -22,6 +22,7 @@ from ..zpl import build_zpl
 from .canvas import LabelCanvas
 from .connection_panel import ConnectionPanel
 from .element_panel import ElementPanel
+from .import_dialog import ImportDialog
 from .label_panel import LabelPanel
 from .workers import Worker
 
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Phomemo Label Studio")
         self.resize(1400, 900)
+        self.setAcceptDrops(True)  # glisser un PDF / une image d'étiquette sur la fenêtre
         self.label: Label = templates.shipping_100x150()
         self.path: str | None = None
         self.dirty = False
@@ -165,6 +167,8 @@ class MainWindow(QMainWindow):
         a_open = act("Ouvrir…", self.open_file, "Ctrl+O")
         a_save = act("Enregistrer", self.save_file, "Ctrl+S")
         a_saveas = act("Enregistrer sous…", lambda: self.save_file(as_new=True), "Ctrl+Shift+S")
+        a_import = act("Importer une étiquette Vinted / Leboncoin…", self.import_shipping, "Ctrl+I",
+                       "Rogner et imprimer un bordereau PDF ou une image")
         a_png = act("Exporter l'aperçu (PNG)…", self.export_png)
         a_cmd = act("Exporter les commandes brutes…", self.export_commands)
         a_quit = act("Quitter", self.close, "Ctrl+Q")
@@ -179,6 +183,8 @@ class MainWindow(QMainWindow):
         mf = m.addMenu("&Fichier")
         for a in (a_new, a_open, a_save, a_saveas):
             mf.addAction(a)
+        mf.addSeparator()
+        mf.addAction(a_import)
         mf.addSeparator()
         for a in (a_png, a_cmd):
             mf.addAction(a)
@@ -200,6 +206,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         for a in (a_new, a_open, a_save):
             tb.addAction(a)
+        tb.addSeparator()
+        tb.addAction(a_import)
         tb.addSeparator()
         for a in (a_zout, a_zin, a_fit):
             tb.addAction(a)
@@ -500,6 +508,37 @@ class MainWindow(QMainWindow):
             self.log("Auto-test envoyé : l'imprimante doit sortir sa page de configuration.")
 
         self._run(lambda _p: printer.send_selftest(cfg, lang), "Envoi de l'auto-test…", ok)
+
+    # ================================================================== import Vinted / Leboncoin
+    def import_shipping(self, path: str | None = None) -> None:
+        """Rogne un bordereau (PDF/image) et le place sur l'étiquette, puis imprime si demandé."""
+        dlg = ImportDialog(self.label.settings, path, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted or dlg.element is None:
+            return
+        if dlg.replace:
+            if not self._confirm_discard():
+                return
+            settings = copy.deepcopy(self.label.settings)
+            settings.width_mm, settings.height_mm = dlg.target_size
+            self._load_label(Label(settings, [dlg.element]), fit=True)
+        else:
+            self.label.elements.append(dlg.element)
+            self._rebuild_list(len(self.label.elements) - 1)
+            self.canvas.refresh()
+            self._select(len(self.label.elements) - 1)
+        self._set_dirty(True)
+        self._code_timer.start()
+        self.log(f"Étiquette de transport importée : {dlg.element.image_name}")
+        if dlg.print_now:
+            QTimer.singleShot(0, self.print_label)
+
+    def dragEnterEvent(self, event) -> None:
+        urls = event.mimeData().urls()
+        if urls and urls[0].isLocalFile() and urls[0].toLocalFile().lower().endswith(importer.SUPPORTED_EXTS):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        self.import_shipping(event.mimeData().urls()[0].toLocalFile())
 
     # ================================================================== divers
     def about(self) -> None:

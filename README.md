@@ -12,6 +12,7 @@ sur une **Phomemo PM-241-BT** sous **Linux Mint**, en TSPL (ou ZPL), **sans CUPS
 - **Langages** : TSPL (par défaut) ou ZPL II, en deux modes :
   - **Raster** (recommandé) : l'étiquette est envoyée en une image `BITMAP` → rendu identique à l'aperçu, accents et polices TrueType compris.
   - **Natif** : `TEXT` / `BARCODE` / `QRCODE` / `BOX` (ZPL : `^A0` / `^B*` / `^BQ` / `^GB`) — très léger, mais limité aux polices internes de l'imprimante.
+- **Import d'étiquettes de transport (Vinted, Leboncoin…)** : ouvre un bordereau PDF ou image, détecte et rogne l'étiquette, l'ajuste au format thermique (rotation automatique, marges, seuil noir/blanc pour garder des codes-barres lisibles) et l'imprime en un clic.
 - Panneau « Commandes générées » (ce qui sera réellement envoyé), export `.tspl` / `.zpl`, export PNG, projets `.label.json` (images incluses), modèles prêts à l'emploi.
 
 ## Installation (Linux Mint 21/22)
@@ -38,6 +39,17 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 # ou
 .venv/bin/python main.py
 ```
+
+## Imprimer une étiquette Vinted / Leboncoin
+
+1. Téléchargez le bordereau (PDF) depuis Vinted ou Leboncoin.
+2. Dans l'application : **Fichier → Importer une étiquette Vinted / Leboncoin…** (Ctrl+I), ou **glissez le PDF sur la fenêtre**.
+3. L'étiquette est détectée automatiquement (cadre bleu). Sinon : cliquez sur un bloc orange, ou tracez un rectangle à la souris ; *Retirer les marges* resserre le cadre ; *↻ 90°* tourne.
+4. Choisissez le format de votre rouleau (100 × 150 mm par exemple) ; l'aperçu en bas montre exactement ce qui sortira.
+5. **Importer et imprimer** (ou *Remplacer* / *Ajouter* pour retoucher avant : ajouter un texte, un n° de commande…).
+
+Astuce : cliquez sur **Mémoriser…** une fois pour chaque transporteur (ex. « Vinted – Mondial Relay ») : les prochains PDF de même mise en page se rognent en un clic avec **Appliquer**.
+Si un code-barres semble trop clair ou trop gras, réglez *Noirceur*. Vérifiez toujours que le code-barres se scanne sur le premier tirage.
 
 ## Connecter l'imprimante
 
@@ -86,9 +98,10 @@ labelstudio/
   renderer.py               éléments -> bitmaps (aperçu ET impression raster) + géométrie native
   tspl.py / zpl.py          générateurs de trames
   printer.py                connexions Bluetooth RFCOMM / USB / série, test de statut
+  importer.py               PDF/image -> détection de blocs, rognage, mise à l'échelle, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
-tests/test_core.py          25 tests unitaires (python -m unittest discover -s tests)
+tests/                      39 tests unitaires (python -m unittest discover -s tests)
 ```
 
 ## Dépannage
