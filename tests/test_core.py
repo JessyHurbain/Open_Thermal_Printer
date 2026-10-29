@@ -488,6 +488,105 @@ class BluetoothConnectTests(unittest.TestCase):
         self.assertIn("déjà utilisée", str(caught.exception))
 
 
+class _FakeLink(printer.Connection):
+    """Liaison simulée : aucune E/S réelle, tout est observable par les tests."""
+
+    def __init__(self, replies: tuple[bytes, ...] = (b"\x00",), alive: bool = True,
+                 open_error: str | None = None, write_error: str | None = None):
+        self.replies, self.alive = list(replies), alive
+        self.open_error, self.write_error = open_error, write_error
+        self.open_count = self.closed = 0
+
+    def open(self) -> None:
+        if self.open_error:
+            raise printer.PrinterError(self.open_error)
+        self.open_count += 1
+
+    def close(self) -> None:
+        self.closed += 1
+
+    def _write(self, chunk: bytes) -> None:
+        if self.write_error:
+            raise printer.PrinterError(self.write_error)
+
+    def read(self, size: int = 64, timeout: float = 1.0) -> bytes:
+        return self.replies.pop(0) if self.replies else b""
+
+    def check_alive(self) -> bool:
+        return self.alive
+
+
+class StatusProbeTests(unittest.TestCase):
+    """Surveillance : la liaison reste ouverte entre deux vérifications (pas de clignotement BlueZ)."""
+
+    cfg = {"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF", "channel": 1}
+
+    def _probe(self, *links: printer.Connection):
+        queue = list(links)
+        made: list[printer.Connection] = []
+
+        def factory(_cfg, _timeout):
+            link = queue.pop(0) if len(queue) > 1 else queue[0]
+            made.append(link)
+            return link
+
+        return printer.StatusProbe(self.cfg, factory=factory), made
+
+    def test_the_link_is_kept_between_two_checks(self):
+        link = _FakeLink()
+        probe, made = self._probe(link)
+        self.assertTrue(probe.check().ok)
+        self.assertTrue(probe.check().ok)
+        self.assertEqual(len(made), 1)  # une seule ouverture pour deux vérifications
+        self.assertEqual(link.open_count, 1)
+        self.assertEqual(link.closed, 0)
+
+    def test_usb_is_released_after_each_check(self):
+        link = _FakeLink()
+        probe = printer.StatusProbe({"type": "usb", "path": "/dev/usb/lp0"},
+                                   factory=lambda _c, _t: link)
+        probe.check()
+        probe.check()
+        self.assertEqual(link.open_count, 2)  # un périphérique USB n'est pas gardé occupé
+        self.assertEqual(link.closed, 2)
+        self.assertIsNone(probe._conn)
+
+    def test_a_link_that_went_silent_is_reopened_once(self):
+        stale, fresh = _FakeLink(write_error="liaison perdue"), _FakeLink()
+        probe, made = self._probe(fresh)
+        probe._conn = stale  # liaison ouverte plus tôt, devenue muette
+        self.assertTrue(probe.check().ok)
+        self.assertEqual(stale.closed, 1)
+        self.assertEqual([link.open_count for link in made], [1])
+
+    def test_failure_to_open_is_reported_without_a_link(self):
+        probe, _ = self._probe(_FakeLink(open_error="Imprimante injoignable : est-elle allumée ?"))
+        result = probe.check()
+        self.assertFalse(result.ok)
+        self.assertIn("injoignable", result.message)
+        self.assertIsNone(probe._conn)
+
+    def test_a_closed_link_is_detected_when_the_status_stays_silent(self):
+        probe, _ = self._probe(_FakeLink(replies=(), alive=False))
+        result = probe.check()
+        self.assertFalse(result.ok)
+        self.assertIn("fermée", result.message)
+
+    def test_close_releases_the_link(self):
+        link = _FakeLink()
+        probe, _ = self._probe(link)
+        probe.check()
+        probe.close()
+        self.assertEqual(link.closed, 1)
+        self.assertIsNone(probe._conn)
+
+    def test_matches_only_the_same_connection(self):
+        probe = printer.StatusProbe(self.cfg)
+        self.assertTrue(probe.matches(dict(self.cfg), "tspl"))
+        self.assertFalse(probe.matches(dict(self.cfg), "zpl"))
+        self.assertFalse(probe.matches({"type": "usb", "path": "/dev/usb/lp0"}, "tspl"))
+
+
 class PairTests(unittest.TestCase):
     @staticmethod
     def _done(stdout: str = "", stderr: str = "", code: int = 0):

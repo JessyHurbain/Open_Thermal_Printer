@@ -50,6 +50,14 @@ class Connection(ABC):
     def read(self, size: int = 64, timeout: float = 1.0) -> bytes:
         """Lit jusqu'à `size` octets ; renvoie b'' si rien n'arrive avant `timeout`."""
 
+    def check_alive(self) -> bool:
+        """False si le périphérique a fermé la liaison (utile pour un lien gardé ouvert).
+
+        Sans information contraire, une liaison ouverte est considérée vivante : les
+        transports USB et série le signalent d'eux-mêmes en erreur d'écriture.
+        """
+        return True
+
     def send(self, data: bytes, progress: ProgressCb | None = None, settle: float = 0.4) -> None:
         total = len(data) or 1
         for pos in range(0, len(data), CHUNK_SIZE):
@@ -131,6 +139,18 @@ class BluetoothConnection(Connection):
             return self.sock.recv(size)
         except OSError:
             return b""
+
+    def check_alive(self) -> bool:
+        """Distingue « rien à lire » (lien vivant) d'une fin de flux, seule trace d'une déconnexion."""
+        if self.sock is None:
+            return False
+        try:
+            ready, _, _ = select.select([self.sock], [], [], 0)
+            if not ready:
+                return True
+            return bool(self.sock.recv(1, socket.MSG_PEEK))
+        except OSError:
+            return False
 
 
 class UsbLpConnection(Connection):
@@ -527,6 +547,42 @@ _TSPL_STATUS = {
 }
 
 
+def query_status(conn: Connection, language: str = "tspl") -> TestResult:
+    """Interroge une liaison déjà ouverte (statut TSPL ou ZPL). Lève `PrinterError` si elle casse."""
+    lines = ["Liaison établie."]
+    if language == "zpl":
+        conn._write(b"~HS")
+        reply = conn.read(128, 1.5)
+        if reply:
+            lines.append("Statut ZPL reçu : " + reply.decode("ascii", "replace").strip().replace("\r\n", " | "))
+        else:
+            lines.append("Aucune réponse au statut (~HS) — fréquent sur les imprimantes compatibles.")
+        return TestResult(True, "\n".join(lines))
+
+    conn._write(b"\x1b!?")  # statut : 1 octet
+    status = conn.read(1, 1.5)
+    if status:
+        code = status[0]
+        if code == 0:
+            lines.append("État : prête.")
+        else:
+            problems = [txt for bit, txt in _TSPL_STATUS.items() if code & bit]
+            lines.append("État : " + ", ".join(problems) + f" (0x{code:02X}).")
+            if code & 0x20 and not code & 0xDF:
+                pass  # simple impression en cours : pas une anomalie
+        ok = code in (0x00, 0x20)
+    else:
+        if not conn.check_alive():
+            raise PrinterError("Liaison fermée par l'imprimante : éteinte, hors de portée ou déconnectée.")
+        lines.append("Aucune réponse au statut (<ESC>!?) — la liaison fonctionne mais ce modèle ne répond peut-être pas.")
+        ok = True
+    conn._write(b"~!T\r\n")  # nom du modèle
+    model = conn.read(64, 1.0).decode("ascii", "replace").strip()
+    if model:
+        lines.append(f"Modèle : {model}")
+    return TestResult(ok, "\n".join(lines))
+
+
 def test_connection(cfg: dict, language: str = "tspl", timeout: float | None = None) -> TestResult:
     """Ouvre la liaison puis interroge l'imprimante (statut TSPL ou ZPL).
 
@@ -534,38 +590,63 @@ def test_connection(cfg: dict, language: str = "tspl", timeout: float | None = N
     """
     try:
         with make_connection(cfg, timeout) as conn:
-            lines = ["Liaison établie."]
-            if language == "zpl":
-                conn._write(b"~HS")
-                reply = conn.read(128, 1.5)
-                if reply:
-                    lines.append("Statut ZPL reçu : " + reply.decode("ascii", "replace").strip().replace("\r\n", " | "))
-                else:
-                    lines.append("Aucune réponse au statut (~HS) — fréquent sur les imprimantes compatibles.")
-                return TestResult(True, "\n".join(lines))
-
-            conn._write(b"\x1b!?")  # statut : 1 octet
-            status = conn.read(1, 1.5)
-            if status:
-                code = status[0]
-                if code == 0:
-                    lines.append("État : prête.")
-                else:
-                    problems = [txt for bit, txt in _TSPL_STATUS.items() if code & bit]
-                    lines.append("État : " + ", ".join(problems) + f" (0x{code:02X}).")
-                    if code & 0x20 and not code & 0xDF:
-                        pass  # simple impression en cours : pas une anomalie
-                ok = code in (0x00, 0x20)
-            else:
-                lines.append("Aucune réponse au statut (<ESC>!?) — la liaison fonctionne mais ce modèle ne répond peut-être pas.")
-                ok = True
-            conn._write(b"~!T\r\n")  # nom du modèle
-            model = conn.read(64, 1.0).decode("ascii", "replace").strip()
-            if model:
-                lines.append(f"Modèle : {model}")
-            return TestResult(ok, "\n".join(lines))
+            return query_status(conn, language)
     except PrinterError as exc:
         return TestResult(False, str(exc))
+
+
+class StatusProbe:
+    """Liaison de surveillance gardée ouverte entre deux vérifications.
+
+    Rouvrir une liaison Bluetooth à chaque vérification fait clignoter la connexion
+    côté BlueZ : le bureau (Cinnamon, GNOME) affiche alors une notification de
+    connexion puis de déconnexion, en boucle. La liaison est donc conservée, et
+    refaite seulement après un échec ou un changement de configuration.
+
+    `factory` est injectable pour les tests ; elle reçoit (cfg, timeout).
+    """
+
+    def __init__(self, cfg: dict, language: str = "tspl", timeout: float = 3.0,
+                 factory: Callable[[dict, float | None], Connection] = make_connection):
+        self.cfg, self.language, self.timeout = dict(cfg), language, timeout
+        self._factory = factory
+        self._conn: Connection | None = None
+        # Seul le Bluetooth clignote côté BlueZ : USB et série sont ouverts à la demande
+        # pour ne pas garder le périphérique occupé entre deux vérifications.
+        self._keep = self.cfg.get("type") == "bluetooth"
+
+    def matches(self, cfg: dict, language: str) -> bool:
+        """Vrai si la liaison ouverte correspond encore à la configuration demandée."""
+        return self.language == language and self.cfg == dict(cfg)
+
+    def check(self) -> TestResult:
+        """Interroge l'imprimante, en rouvrant la liaison une fois si elle est devenue muette."""
+        if self._conn is None:
+            return self._open_and_query()
+        try:
+            return query_status(self._conn, self.language)
+        except (PrinterError, OSError):
+            self.close()  # lien mort (imprimante éteinte, appairage perdu, câble retiré…)
+        return self._open_and_query()
+
+    def _open_and_query(self) -> TestResult:
+        try:
+            self._conn = self._factory(self.cfg, self.timeout)
+            self._conn.open()
+            result = query_status(self._conn, self.language)
+        except (PrinterError, OSError) as exc:
+            self.close()
+            return TestResult(False, str(exc) if isinstance(exc, PrinterError) else f"Liaison interrompue : {exc}")
+        if not self._keep:
+            self.close()
+        return result
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
 
 
 def send_job(cfg: dict, data: bytes, progress: ProgressCb | None = None) -> None:

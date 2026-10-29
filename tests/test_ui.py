@@ -598,6 +598,94 @@ class UndoTests(unittest.TestCase):
         self.assertFalse(self.win.a_redo.isEnabled())
 
 
+class _SilentLink(printer.Connection):
+    """Liaison factice : compte les ouvertures et fermetures, répond « prête »."""
+
+    def __init__(self):
+        self.open_count = self.closed = 0
+
+    def open(self):
+        self.open_count += 1
+
+    def close(self):
+        self.closed += 1
+
+    def _write(self, chunk):
+        pass
+
+    def read(self, size=64, timeout=1.0):
+        return bytes([0])
+
+    def check_alive(self):
+        return True
+
+
+class ProbeSessionTests(unittest.TestCase):
+    """La surveillance garde sa liaison : pas de reconnexion Bluetooth à chaque vérification."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+        self.cfg = {"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF", "channel": 1}
+
+    def test_the_same_connection_reuses_the_session(self):
+        first = self.win._probe_session_for(self.cfg, "tspl")
+        self.assertIs(self.win._probe_session_for(dict(self.cfg), "tspl"), first)
+
+    def test_another_connection_replaces_the_session(self):
+        first = self.win._probe_session_for(self.cfg, "tspl")
+        usb = {"type": "usb", "path": "/dev/usb/lp0"}
+        second = self.win._probe_session_for(usb, "tspl")
+        self.assertIsNot(first, second)
+        self.assertIs(self.win._probe_session, second)
+
+    def test_checking_a_session_that_was_replaced_does_nothing(self):
+        self.win._probe_session_for(self.cfg, "tspl")
+        stray = printer.StatusProbe(self.cfg, factory=lambda _c, _t: _SilentLink())
+        self.assertIsNone(self.win._check_session(stray))
+
+    def test_checking_the_current_session_queries_the_printer(self):
+        link = _SilentLink()
+        session = printer.StatusProbe(self.cfg, factory=lambda _c, _t: link)
+        self.win._probe_session = session
+        result = self.win._check_session(session)
+        self.assertTrue(result.ok)
+        self.assertEqual(link.open_count, 1)
+
+    def test_periodic_check_reuses_the_open_link(self):
+        self.win.conn_panel.use_bluetooth("AA:BB:CC:DD:EE:FF")
+        cfg = self.win.conn_panel.config()
+        link = _SilentLink()
+        self.win._probe_session = printer.StatusProbe(cfg, factory=lambda _c, _t: link)
+        for _check in range(2):  # deux passages de la surveillance périodique
+            self.win.check_printer()
+            for _ in range(60):
+                if self.win._probe is None:
+                    break
+                pump(0.05)
+        self.assertEqual(link.open_count, 1)  # une seule connexion pour les deux vérifications
+        self.assertIn("joignable", self.win.printer_state.text())
+
+    def test_releasing_the_link_closes_it(self):
+        link = _SilentLink()
+        self.win._probe_session = printer.StatusProbe(self.cfg, factory=lambda _c, _t: link)
+        self.win._check_session(self.win._probe_session)
+        self.win._close_probe_session()
+        self.assertEqual(link.closed, 1)
+        self.assertIsNone(self.win._probe_session)
+
+
 class PairingDialogTests(unittest.TestCase):
     def test_entered_pin_is_given_to_the_pairing(self):
         devices = [printer.Nearby("AA:BB:CC:DD:EE:FF", "PM-241-BT", True)]

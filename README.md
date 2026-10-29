@@ -96,7 +96,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 149 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 162 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -138,6 +138,8 @@ Les captures du tutoriel sont produites **par l'application elle-même**, en Qt 
 
 **État en continu.** La barre d'état affiche en permanence l'état de la liaison — **● Imprimante : joignable**, **injoignable** ou **non configurée** (le survol donne le détail de la dernière réponse). Elle est vérifiée toutes les minutes en arrière-plan, jamais pendant une impression, et remise à jour après chaque test ou envoi réussi.
 
+**Liaison conservée (Bluetooth).** Entre deux vérifications, la liaison Bluetooth reste ouverte : rouvrir une connexion Bluetooth chaque minute fait clignoter l'appareil côté BlueZ, et le bureau (Cinnamon, GNOME) affiche alors une notification « connecté » puis « déconnecté » en boucle. L'imprimante reste donc connectée à l'ordinateur tant que l'application tourne — un téléphone ne pourra pas s'y connecter pendant ce temps ; fermez l'application pour libérer la liaison. Elle est rendue automatiquement avant chaque impression, test manuel, détection ou désappairage, puis reprise à la vérification suivante.
+
 ### Bluetooth (RFCOMM)
 
 1. Allumez l'imprimante, puis appairez-la **une fois** — avec le bouton *Appairer…* de l'application (plus haut) ou en ligne de commande :
@@ -167,7 +169,7 @@ sudo usermod -aG lp,dialout $USER    # puis fermer/rouvrir la session
 ## Utilisation rapide
 
 1. Menu **Modèles** (bordereau 100×150, produit 50×30…) ou **Nouveau**, puis onglet **Étiquette** pour régler format, support (gap), noirceur.
-2. Ajoutez des éléments avec les boutons **＋** à gauche ; sélectionnez-les (clic sur l'aperçu ou dans la liste) pour modifier leurs propriétés à droite.
+2. Ajoutez des éléments avec les boutons à gauche (📝 Texte, ▥ Code-barres…) ; sélectionnez-les (clic sur l'aperçu ou dans la liste) pour modifier leurs propriétés à droite.
 3. Vérifiez le gap et le format correspondent à vos rouleaux, puis **🖨 Imprimer** (Ctrl+P).
 
 ## Structure du projet

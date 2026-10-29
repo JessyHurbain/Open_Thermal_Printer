@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+import threading
 from datetime import datetime
 
 from PIL import ImageOps
@@ -108,6 +109,10 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.printer_state)
         self._printer_ok: bool | None = None
         self._probe: Worker | None = None
+        # La surveillance garde sa liaison ouverte : rouvrir une liaison Bluetooth chaque
+        # minute fait clignoter la connexion côté BlueZ et le bureau le notifie en boucle.
+        self._probe_session: printer.StatusProbe | None = None
+        self._printer_lock = threading.Lock()  # un seul usage de l'imprimante à la fois
 
         self.progress = QProgressBar()
         self.progress.setMaximumWidth(220)
@@ -615,6 +620,7 @@ class MainWindow(QMainWindow):
             self._probe_timer.stop()
             if self._probe and self._probe.isRunning():
                 self._probe.wait(4000)  # laisse la vérification en cours se terminer
+            self._close_probe_session()
             event.accept()
         else:
             event.ignore()
@@ -688,7 +694,9 @@ class MainWindow(QMainWindow):
         lang = self.label.settings.language.upper()
 
         def job(progress):
-            printer.send_job(cfg, data, progress)
+            with self._printer_lock:  # l'imprimante n'accepte qu'une liaison à la fois
+                self._close_probe_session_locked()
+                printer.send_job(cfg, data, progress)
             return len(data)
 
         def ok(size):
@@ -737,7 +745,12 @@ class MainWindow(QMainWindow):
             if cfg["type"] == "bluetooth" and not printer.MAC_RE.match(cfg.get("mac", "")):
                 self._set_printer_state(None, "Imprimante Bluetooth oubliée : appairez-la de nouveau.")
 
-        self._run(lambda _p: printer.forget_bluetooth(mac, name), f"Oubli de {label}…", ok,
+        def job(_progress):
+            with self._printer_lock:  # BlueZ refuse de désappairer un appareil encore connecté
+                self._close_probe_session_locked()
+                return printer.forget_bluetooth(mac, name)
+
+        self._run(job, f"Oubli de {label}…", ok,
                   failure_title="Oubli de l'appareil Bluetooth", inspect_commands=False)
 
     def detect_printer(self) -> None:
@@ -760,8 +773,12 @@ class MainWindow(QMainWindow):
             if detection.chosen is None and pending:
                 self._offer_pairing(pending[0])
 
-        self._run(lambda progress, message: printer.detect_printer(progress, message, lang),
-                  "Recherche de l'imprimante…", ok,
+        def job(progress, message):
+            with self._printer_lock:
+                self._close_probe_session_locked()
+                return printer.detect_printer(progress, message, lang)
+
+        self._run(job, "Recherche de l'imprimante…", ok,
                   failure_title="Détection de l'imprimante", inspect_commands=False)
 
     @staticmethod
@@ -822,13 +839,17 @@ class MainWindow(QMainWindow):
 
     def test_connection(self) -> None:
         cfg, lang = self.conn_panel.config(), self.label.settings.language
+        session = self._probe_session_for(cfg, lang)  # réutilise la liaison déjà ouverte
 
         def ok(result):
+            if result is None:  # la liaison a été rendue entre-temps à un envoi
+                self.log("Test annulé : la liaison a changé de propriétaire.")
+                return
             self.log(("✔ " if result.ok else "✘ ") + result.message)
             self.conn_panel.set_status(result.message, ok=result.ok)
             self._set_printer_state(result.ok, result.message, announce=False)
 
-        self._run(lambda _p: printer.test_connection(cfg, lang), "Test de la connexion…", ok,
+        self._run(lambda _p: self._check_session(session), "Test de la connexion…", ok,
                   failure_title="Test de la connexion", inspect_commands=False)
 
     # ================================================================== état de l'imprimante
@@ -843,20 +864,52 @@ class MainWindow(QMainWindow):
         if cfg["type"] in ("usb", "serial") and not cfg.get("path"):
             self._set_printer_state(None, "Choisissez le port dans l'onglet Connexion.")
             return
-        probe = Worker(lambda _progress: printer.test_connection(cfg, lang, timeout=3.0), self)
+        session = self._probe_session_for(cfg, lang)
+        probe = Worker(lambda _progress: self._check_session(session), self)
         probe.succeeded.connect(lambda result, probed=cfg: self._on_probe(result, probed))
         probe.finished.connect(self._probe_finished)
         probe.finished.connect(probe.deleteLater)
         self._probe = probe
         probe.start()
 
-    def _on_probe(self, result: printer.TestResult, cfg: dict) -> None:
+    def _on_probe(self, result: printer.TestResult | None, cfg: dict) -> None:
+        if result is None:
+            return  # liaison rendue à un envoi : la vérification suivante reprendra
         if cfg != self.conn_panel.config():
             return  # la connexion a changé (oubli, détection…) : ce résultat ne la concerne plus
         self._set_printer_state(result.ok, result.message)
 
     def _probe_finished(self) -> None:
         self._probe = None
+
+    # ------------------------------------------------------------ liaison de surveillance
+    def _probe_session_for(self, cfg: dict, lang: str) -> printer.StatusProbe:
+        """Liaison de surveillance correspondant à la connexion demandée, réutilisée si possible."""
+        if self._probe_session is not None and self._probe_session.matches(cfg, lang):
+            return self._probe_session
+        self._close_probe_session()
+        self._probe_session = printer.StatusProbe(cfg, lang, timeout=3.0)
+        return self._probe_session
+
+    def _check_session(self, session: printer.StatusProbe) -> printer.TestResult | None:
+        """Interroge l'imprimante en sérialisant l'accès avec les envois.
+
+        `None` si la liaison a été rendue entre-temps : le résultat ne concerne plus rien.
+        """
+        with self._printer_lock:
+            if session is not self._probe_session:
+                return None
+            return session.check()
+
+    def _close_probe_session(self) -> None:
+        with self._printer_lock:
+            self._close_probe_session_locked()
+
+    def _close_probe_session_locked(self) -> None:
+        """Ferme la liaison ; à appeler en tenant `_printer_lock`."""
+        if self._probe_session is not None:
+            self._probe_session.close()
+            self._probe_session = None
 
     def _set_printer_state(self, ok: bool | None, detail: str = "", announce: bool = True) -> None:
         """Met à jour l'indicateur permanent ; ne journalise que les changements d'état."""
@@ -877,7 +930,12 @@ class MainWindow(QMainWindow):
         def ok(_):
             self.log("Auto-test envoyé : l'imprimante doit sortir sa page de configuration.")
 
-        self._run(lambda _p: printer.send_selftest(cfg, lang), "Envoi de l'auto-test…", ok)
+        def job(_progress):
+            with self._printer_lock:
+                self._close_probe_session_locked()
+                printer.send_selftest(cfg, lang)
+
+        self._run(job, "Envoi de l'auto-test…", ok)
 
     # ================================================================== import Vinted / Leboncoin
     def import_shipping(self, paths: list[str] | None = None) -> None:
@@ -927,10 +985,12 @@ class MainWindow(QMainWindow):
                 yield builder(Label(s, [el]))
 
         def job(progress, message):
-            return printer.send_jobs(
-                cfg, frames(), progress, total=n,
-                on_job=lambda i, total: message(f"Étiquette {i}/{total}…"),
-            )
+            with self._printer_lock:
+                self._close_probe_session_locked()
+                return printer.send_jobs(
+                    cfg, frames(), progress, total=n,
+                    on_job=lambda i, total: message(f"Étiquette {i}/{total}…"),
+                )
 
         def ok(sent):
             self.log(f"Lot terminé : {sent} étiquette(s) envoyée(s).")
