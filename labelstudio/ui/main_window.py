@@ -461,7 +461,9 @@ class MainWindow(QMainWindow):
         self.log_view.appendPlainText(f"[{datetime.now():%H:%M:%S}] {message}")
         self.statusBar().showMessage(message.splitlines()[0], 8000)
 
-    def _run(self, fn, busy_text: str, on_ok) -> None:
+    def _run(self, fn, busy_text: str, on_ok, failure_title: str = "Erreur d'impression",
+             inspect_commands: bool = True) -> None:
+        """Lance `fn` en arrière-plan ; `failure_title` et l'onglet affiché dépendent de l'opération."""
         if self._worker and self._worker.isRunning():
             self.log("Une opération est déjà en cours.")
             return
@@ -476,23 +478,26 @@ class MainWindow(QMainWindow):
         w.progress.connect(self.progress.setValue)
         w.message.connect(self.log)
         w.succeeded.connect(on_ok)
-        w.failed.connect(self._on_failed)
+        w.failed.connect(lambda message: self._on_failed(message, failure_title, inspect_commands))
         w.finished.connect(self._on_worker_done)
+        w.finished.connect(w.deleteLater)  # sans cela, un QThread s'accumule à chaque opération
         self._worker = w
         w.start()
 
     def _on_worker_done(self) -> None:
+        self._worker = None  # le thread est détruit juste après : plus aucune référence
         self.progress.setVisible(False)
         self.conn_panel.set_busy(False)
         self.a_print.setEnabled(True)
         self.a_detect.setEnabled(True)
         self.a_test.setEnabled(True)
 
-    def _on_failed(self, message: str) -> None:
+    def _on_failed(self, message: str, title: str = "Erreur d'impression", inspect_commands: bool = True) -> None:
         self.log(f"Erreur : {message}")
         self.conn_panel.set_status(message, ok=False)
-        self.bottom_tabs.setCurrentIndex(1)
-        QMessageBox.critical(self, "Erreur d'impression", message)
+        if inspect_commands:
+            self.bottom_tabs.setCurrentIndex(1)
+        QMessageBox.critical(self, title, message)
 
     def print_label(self) -> None:
         cfg = self.conn_panel.config()
@@ -560,7 +565,8 @@ class MainWindow(QMainWindow):
             if cfg["type"] == "bluetooth" and not printer.MAC_RE.match(cfg.get("mac", "")):
                 self._set_printer_state(None, "Imprimante Bluetooth oubliée : appairez-la de nouveau.")
 
-        self._run(lambda _p: printer.forget_bluetooth(mac, name), f"Oubli de {label}…", ok)
+        self._run(lambda _p: printer.forget_bluetooth(mac, name), f"Oubli de {label}…", ok,
+                  failure_title="Oubli de l'appareil Bluetooth", inspect_commands=False)
 
     def detect_printer(self) -> None:
         """Cherche l'imprimante (Bluetooth appairée, USB, série), remplit la connexion et teste la liaison."""
@@ -575,7 +581,8 @@ class MainWindow(QMainWindow):
                 self.log(("✔ " if detection.result.ok else "✘ ") + detection.result.message)
 
         self._run(lambda progress, message: printer.detect_printer(progress, message, lang),
-                  "Recherche de l'imprimante…", ok)
+                  "Recherche de l'imprimante…", ok,
+                  failure_title="Détection de l'imprimante", inspect_commands=False)
 
     def test_connection(self) -> None:
         cfg, lang = self.conn_panel.config(), self.label.settings.language
@@ -585,7 +592,8 @@ class MainWindow(QMainWindow):
             self.conn_panel.set_status(result.message, ok=result.ok)
             self._set_printer_state(result.ok, result.message, announce=False)
 
-        self._run(lambda _p: printer.test_connection(cfg, lang), "Test de la connexion…", ok)
+        self._run(lambda _p: printer.test_connection(cfg, lang), "Test de la connexion…", ok,
+                  failure_title="Test de la connexion", inspect_commands=False)
 
     # ================================================================== état de l'imprimante
     def check_printer(self) -> None:
@@ -602,6 +610,7 @@ class MainWindow(QMainWindow):
         probe = Worker(lambda _progress: printer.test_connection(cfg, lang, timeout=3.0), self)
         probe.succeeded.connect(lambda result, probed=cfg: self._on_probe(result, probed))
         probe.finished.connect(self._probe_finished)
+        probe.finished.connect(probe.deleteLater)
         self._probe = probe
         probe.start()
 

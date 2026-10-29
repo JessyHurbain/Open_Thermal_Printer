@@ -75,10 +75,15 @@ class PairingDialog(QDialog):
         worker = Worker(fn, self)
         worker.succeeded.connect(done)
         worker.failed.connect(lambda message: self._set_status(message, "#d93025"))
-        worker.finished.connect(lambda: QTimer.singleShot(0, self._sync_buttons))
+        worker.finished.connect(self._worker_done)
+        worker.finished.connect(worker.deleteLater)  # sinon un QThread s'accumule à chaque recherche
         self._worker = worker
         self._sync_buttons()
         worker.start()
+
+    def _worker_done(self) -> None:
+        self._worker = None  # le thread est détruit juste après : plus aucune référence
+        QTimer.singleShot(0, self._sync_buttons)
 
     # ------------------------------------------------------------ recherche
     def scan(self) -> None:
