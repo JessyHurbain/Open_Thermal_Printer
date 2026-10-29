@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 
 from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMenu,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .. import __version__, importer, printer, templates
@@ -107,7 +107,14 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress)
 
+        # Quadrillage de l'aperçu : mémorisé entre les sessions
+        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self.grid_mm = float(self.qs.value("view/grid_mm", 5.0))
+        self.grid_on = self._saved_flag("view/grid", False)
+        self.snap_on = self._saved_flag("view/snap", False)
+
         self._build_actions()
+        self._apply_grid()
 
         # ---- signaux
         self.canvas.selectionChanged.connect(self._on_canvas_selected)
@@ -206,6 +213,14 @@ class MainWindow(QMainWindow):
         a_zin = act("Zoom +", lambda: self._set_zoom(self.canvas.px_per_mm * 1.25), "Ctrl++")
         a_zout = act("Zoom −", lambda: self._set_zoom(self.canvas.px_per_mm / 1.25), "Ctrl+-")
         a_fit = act("Ajuster", self.fit_zoom, "Ctrl+0")
+        self.a_grid = act("Afficher la grille", self.toggle_grid, "Ctrl+G",
+                          "Quadrillage en millimètres par-dessus l'aperçu (jamais imprimé)")
+        self.a_grid.setCheckable(True)
+        self.a_grid.setChecked(self.grid_on)
+        self.a_snap = act("Aligner sur la grille", self.toggle_snap, "Ctrl+Shift+G",
+                          "Arrondit les déplacements (souris et flèches) au pas de la grille")
+        self.a_snap.setCheckable(True)
+        self.a_snap.setChecked(self.snap_on)
         a_about = act("À propos", self.about)
 
         m = self.menuBar()
@@ -225,6 +240,20 @@ class MainWindow(QMainWindow):
         mv = m.addMenu("&Affichage")
         for a in (a_zin, a_zout, a_fit):
             mv.addAction(a)
+        mv.addSeparator()
+        mv.addAction(self.a_grid)
+        mv.addAction(self.a_snap)
+        step_menu = QMenu("Pas de la grille", self)
+        self._step_group = QActionGroup(self)
+        self._step_group.setExclusive(True)
+        for mm in (1.0, 2.0, 5.0, 10.0):
+            a = QAction(f"{mm:g} mm", self)
+            a.setCheckable(True)
+            a.setChecked(abs(mm - self.grid_mm) < 1e-6)
+            a.triggered.connect(lambda _=False, v=mm: self.set_grid_step(v))
+            self._step_group.addAction(a)
+            step_menu.addAction(a)
+        mv.addMenu(step_menu)
         mi = m.addMenu("&Imprimante")
         mi.addAction(self.a_detect)
         mi.addAction(self.a_test)
@@ -373,8 +402,34 @@ class MainWindow(QMainWindow):
     def fit_zoom(self) -> None:
         s = self.label.settings
         avail = self.scroll.viewport().size()
-        k = min((avail.width() - 60) / s.width_mm, (avail.height() - 60) / s.height_mm)
+        pad = self.canvas.frame_px + 12  # règles et marges comprises
+        k = min((avail.width() - pad) / s.width_mm, (avail.height() - pad) / s.height_mm)
         self._set_zoom(max(1.0, k))
+
+    # ================================================================== quadrillage
+    def _saved_flag(self, key: str, default: bool) -> bool:
+        """QSettings peut rendre un booléen ou sa forme texte selon la plate-forme."""
+        value = self.qs.value(key, "true" if default else "false")
+        return str(value).strip().lower() in ("true", "1", "yes")
+
+    def toggle_grid(self, checked: bool) -> None:
+        self.grid_on = checked
+        self.qs.setValue("view/grid", checked)
+        self._apply_grid()
+
+    def toggle_snap(self, checked: bool) -> None:
+        self.snap_on = checked
+        self.qs.setValue("view/snap", checked)
+        self._apply_grid()
+
+    def set_grid_step(self, mm: float) -> None:
+        self.grid_mm = float(mm)
+        self.qs.setValue("view/grid_mm", self.grid_mm)
+        self._apply_grid()
+
+    def _apply_grid(self) -> None:
+        """Recopie l'état du quadrillage sur l'aperçu (le rendu d'impression n'en dépend pas)."""
+        self.canvas.set_grid(self.grid_mm, self.grid_on, self.snap_on)
 
     # ================================================================== fichiers
     def _confirm_discard(self) -> bool:

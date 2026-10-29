@@ -16,10 +16,16 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # avant toute création de QApplication
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from PyQt6.QtCore import QSettings  # noqa: E402
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
+from PyQt6.QtGui import QMouseEvent  # noqa: E402
+from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from labelstudio import printer  # noqa: E402
+from labelstudio import printer, templates  # noqa: E402
+from labelstudio.models import Element, Label, LabelSettings  # noqa: E402
+from labelstudio.ui.canvas import (  # noqa: E402
+    GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
+)
 from labelstudio.ui.connection_panel import ConnectionPanel  # noqa: E402
 from labelstudio.ui.main_window import MainWindow  # noqa: E402
 from labelstudio.ui.pairing_dialog import PairingDialog  # noqa: E402
@@ -249,6 +255,198 @@ class MainWindowConnectionTests(unittest.TestCase):
             pump(0.1)
         called.assert_not_called()
         self.assertEqual(self.panel.mac_address(), "AA:BB:CC:DD:EE:FF")
+
+
+class CanvasGridTests(unittest.TestCase):
+    """Quadrillage de l'aperçu : alignement au pas choisi, sans toucher au rendu d'impression."""
+
+    def setUp(self):
+        self.canvas = LabelCanvas(templates.shipping_100x150())
+        self.addCleanup(self.canvas.deleteLater)
+
+    def test_snap_rounds_to_the_nearest_step(self):
+        self.canvas.set_grid(5.0, True, True)
+        self.assertEqual(self.canvas.snap_mm(12.4), 10.0)
+        self.assertEqual(self.canvas.snap_mm(13.0), 15.0)
+
+    def test_snap_off_keeps_the_tenth_of_a_millimetre(self):
+        self.canvas.set_grid(5.0, True, False)
+        self.assertEqual(self.canvas.snap_mm(12.34), 12.3)
+
+    def test_step_is_used_as_given(self):
+        self.canvas.set_grid(10.0, True, True)
+        self.assertEqual(self.canvas.snap_mm(16.0), 20.0)
+
+    def test_editing_state_does_not_change_the_label(self):
+        self.canvas.set_grid(5.0, True, True)
+        self.assertEqual(self.canvas.label.settings.width_mm, 100.0)
+        self.assertEqual(len(self.canvas.label.elements), len(templates.shipping_100x150().elements))
+
+
+class CanvasRulerTests(unittest.TestCase):
+    """Règles graduées : place réservée autour de l'étiquette, pas adapté au zoom, dessin effectif."""
+
+    def setUp(self):
+        self.canvas = LabelCanvas(templates.shipping_100x150())
+        self.addCleanup(self.canvas.deleteLater)
+
+    def test_label_is_offset_by_the_ruler_band(self):
+        rect = self.canvas._label_rect()
+        self.assertEqual((rect.left(), rect.top()), (ORIGIN, ORIGIN))
+        self.assertEqual(self.canvas.frame_px, ORIGIN + MARGIN)
+
+    def test_widget_grows_to_fit_the_rulers(self):
+        ppm = self.canvas.px_per_mm
+        self.assertEqual(self.canvas.width(), int(100 * ppm) + ORIGIN + MARGIN)
+        self.assertEqual(self.canvas.height(), int(150 * ppm) + ORIGIN + MARGIN)
+
+    def test_steps_follow_the_zoom(self):
+        self.assertEqual(ruler_steps(1.0), (50.0, 20.0))  # vue d'ensemble : repères tous les 5 cm
+        self.assertEqual(ruler_steps(6.0), (5.0, 2.0))
+        self.assertEqual(ruler_steps(20.0), (2.0, 1.0))  # fort zoom : au millimètre
+
+    def test_rulers_are_painted_around_the_label(self):
+        image = self.canvas.grab().toImage()
+        self.assertEqual(image.pixelColor(ORIGIN + 50, ORIGIN - RULER + 1).name(), "#f1f3f4")
+        self.assertEqual(image.pixelColor(ORIGIN - RULER + 1, ORIGIN + 50).name(), "#f1f3f4")
+        # au moins une graduation tracée sur chaque règle (trait ou chiffre)
+        top = {image.pixelColor(x, ORIGIN - RULER + 16).name() for x in range(ORIGIN, ORIGIN + 300)}
+        left = {image.pixelColor(ORIGIN - RULER + 18, y).name() for y in range(ORIGIN, ORIGIN + 450)}
+        self.assertIn("#5f6368", top)
+        self.assertIn("#5f6368", left)
+
+
+class CanvasGuideTests(unittest.TestCase):
+    """Guides magnétiques : l'élément glissé se cale sur les bords et centres voisins."""
+
+    def setUp(self):
+        label = Label(
+            settings=LabelSettings(width_mm=100, height_mm=50),
+            elements=[
+                Element(kind="rect", x=10.0, y=10.0, width=20.0, height=10.0),
+                Element(kind="rect", x=70.0, y=30.0, width=20.0, height=10.0),
+            ],
+        )
+        self.canvas = LabelCanvas(label)
+        self.canvas.set_zoom(4.0)  # tolérance de 6 px = 1,5 mm
+        self.addCleanup(self.canvas.deleteLater)
+
+    def test_offset_takes_the_closest_target_within_tolerance(self):
+        self.assertEqual(alignment_offset((10.0, 20.0), {11.0, 13.0}, 1.5), (1.0, 11.0))
+        delta, target = alignment_offset((10.0,), {11.0, 10.4}, 1.5)
+        self.assertAlmostEqual(delta, 0.4)
+        self.assertEqual(target, 10.4)
+        self.assertIsNone(alignment_offset((10.0,), {14.0}, 1.5))
+
+    def test_dragged_element_snaps_to_a_neighbours_edge(self):
+        x, y = self.canvas.magnetize(20.6, 31.0, 1)
+        self.assertAlmostEqual(x, 20.0, delta=0.1)  # bord gauche ↔ bord droit du voisin
+        self.assertEqual(y, 31.0)
+        self.assertAlmostEqual(self.canvas._guides[0], x, delta=0.01)
+        self.assertIsNone(self.canvas._guides[1])
+
+    def test_dragged_element_snaps_to_the_label_centre(self):
+        x, _y = self.canvas.magnetize(39.6, 44.0, 1)
+        self.assertAlmostEqual(x, 40.0, delta=0.1)  # centre de l'élément ↔ centre de l'étiquette
+        self.assertAlmostEqual(self.canvas._guides[0], 50.0)
+
+    def test_far_away_nothing_is_snapped_and_guides_are_cleared(self):
+        self.canvas.magnetize(20.6, 31.0, 1)
+        x, y = self.canvas.magnetize(45.0, 30.0, 1)
+        self.assertEqual((x, y), (45.0, 30.0))
+        self.assertEqual(self.canvas._guides, (None, None))
+
+    def test_suspended_guides_leave_the_position_free(self):
+        x, y = self.canvas.magnetize(20.6, 31.0, 1, active=False)
+        self.assertEqual((x, y), (20.6, 31.0))
+        self.assertEqual(self.canvas._guides, (None, None))
+
+    def test_alt_during_a_drag_suspends_the_snapping(self):
+        self.canvas.setFocus()
+        canvas = self.canvas
+        start, target = self._at(80.0, 35.0), self._at(30.6, 35.0)
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+        self.addCleanup(lambda: QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=target))
+        # Alt enfoncé : le glisser reste libre
+        QApplication.sendEvent(canvas, self._move(target, Qt.KeyboardModifier.AltModifier))
+        self.assertEqual(round(canvas.label.elements[1].x, 1), 20.5)  # 30,6 mm arrondi au pixel
+        self.assertEqual(canvas._guides, (None, None))
+        # sans Alt, le même geste s'accroche au bord du voisin
+        QApplication.sendEvent(canvas, self._move(target, Qt.KeyboardModifier.NoModifier))
+        self.assertAlmostEqual(canvas.label.elements[1].x, 20.0, delta=0.1)
+        self.assertIsNotNone(canvas._guides[0])
+
+    def _at(self, x_mm: float, y_mm: float) -> QPoint:
+        k = self.canvas.px_per_mm
+        return QPoint(int(ORIGIN + x_mm * k), int(ORIGIN + y_mm * k))
+
+    def _move(self, pos: QPoint, modifiers: Qt.KeyboardModifier) -> QMouseEvent:
+        point = QPointF(pos)
+        return QMouseEvent(QEvent.Type.MouseMove, point, point, Qt.MouseButton.NoButton,
+                           Qt.MouseButton.LeftButton, modifiers)
+
+    def test_active_guides_are_painted(self):
+        self.canvas.magnetize(20.6, 31.0, 1)
+        self.canvas.refresh()
+        image = self.canvas.grab().toImage()
+        column = int(ORIGIN + self.canvas._guides[0] * self.canvas.px_per_mm)
+        colours = {image.pixelColor(x, y).name()
+                   for x in range(column - 2, column + 3)
+                   for y in range(ORIGIN, ORIGIN + 150)}
+        self.assertIn(GUIDE_COLOR, colours)  # trait en pointillés : on balaie la colonne
+
+
+class GridMenuTests(unittest.TestCase):
+    """Les deux entrées d'Affichage pilotent l'aperçu et sont mémorisées."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        # Réglages neutres avant la construction : chaque test part d'un état connu.
+        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        for key in ("view/grid", "view/snap", "view/grid_mm"):
+            self.qs.remove(key)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+
+    def test_grid_action_shows_and_persists_the_grid(self):
+        self.win.a_grid.trigger()
+        self.assertTrue(self.win.canvas.grid_visible)
+        self.assertEqual(str(self.qs.value("view/grid")).lower(), "true")
+        self.win.a_grid.trigger()
+        self.assertFalse(self.win.canvas.grid_visible)
+
+    def test_snap_action_aligns_the_element_drags(self):
+        self.win.a_snap.trigger()
+        self.assertTrue(self.win.canvas.snap)
+        self.assertEqual(self.win.canvas.snap_mm(7.9), 10.0)
+
+    def test_state_is_restored_on_the_next_start(self):
+        self.win.a_grid.trigger()
+        self.win.set_grid_step(10.0)
+        second = MainWindow()
+        second._probe_timer.stop()
+        self.addCleanup(second.deleteLater)
+        self.assertTrue(second.canvas.grid_visible)
+        self.assertEqual(second.canvas.grid_mm, 10.0)
+
+    def test_grid_step_menu_changes_the_step(self):
+        self.win.a_snap.trigger()
+        for action in self.win._step_group.actions():
+            if action.text() == "10 mm":
+                action.trigger()
+        self.assertEqual(self.win.canvas.grid_mm, 10.0)
+        self.assertEqual(float(self.qs.value("view/grid_mm")), 10.0)
+        self.assertEqual(self.win.canvas.snap_mm(16.0), 20.0)
 
 
 class PairingDialogTests(unittest.TestCase):

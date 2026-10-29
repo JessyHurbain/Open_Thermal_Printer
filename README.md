@@ -56,6 +56,12 @@ Pour partir d'une page blanche : `Ctrl+N` puis **Format prédéfini** ; pour un 
 
 Cliquez sur un élément dans l'aperçu ou dans la liste : l'onglet **Élément** affiche ses réglages propres. Ici un code-barres Code 128 : données, symbologie, hauteur des barres, largeur de module et affichage du texte sous le code. Position et rotation se règlent au dixième de millimètre ; au clavier, les flèches déplacent de 0,5 mm (avec **Maj** : 2 mm), `Suppr` retire l'élément.
 
+**Quadrillage.** Le menu **Affichage** propose *Afficher la grille* (`Ctrl+G`) — un quadrillage en millimètres sur l'aperçu, avec un trait plus marqué toutes les cinq mailles —, *Aligner sur la grille* (`Ctrl+Shift+G`) pour y accrocher les déplacements à la souris comme aux flèches, et le *Pas de la grille* (1, 2, 5 ou 10 mm). Le choix est mémorisé d'une session à l'autre. Le quadrillage n'existe qu'à l'écran : il ne figure jamais sur l'étiquette imprimée.
+
+**Règles graduées.** Deux règles en millimètres encadrent l'aperçu, en haut et à gauche : elles donnent la position d'un élément sans passer par les champs de saisie. Leur pas suit le zoom — au millimètre quand on agrandit, au centimètre quand on dézoome — pour rester lisible ; le coin rappelle l'unité. Comme le quadrillage, elles sont purement visuelles et n'apparaissent jamais sur l'étiquette imprimée.
+
+**Guides magnétiques.** Pendant un glisser, l'élément s'accroche aux bords et aux centres des autres éléments, ainsi qu'aux bords et au centre de l'étiquette ; une ligne orange en pointillés montre l'alignement retenu. Les trois repères de l'élément — bord de départ, centre, bord d'arrivée — sont candidats, dans les deux sens, et chaque axe s'aligne indépendamment : un élément peut se caler à gauche sur un voisin et au centre horizontalement sur l'étiquette. La tolérance suit le zoom (environ 6 px, plafonnée à 2 mm) : il suffit d'éloigner la souris pour ignorer un guide. Les guides se cumulent avec le quadrillage, qui arrondit d'abord la position. Maintenir **Alt** pendant le glisser suspend l'accrochage pour ce geste — les lignes disparaissent — ce qui permet de poser un élément juste à côté d'un autre sans être attiré.
+
 ### 3. Connecter l'imprimante
 
 ![Onglet Connexion, exemple avec une PM-241-BT appairée](docs/screenshots/connexion.png)
@@ -81,12 +87,13 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 | `Ctrl+P` | Imprimer l'étiquette affichée |
 | `Ctrl+D` | Détecter l'imprimante |
 | `Ctrl+0`, `Ctrl++`, `Ctrl+-` | Ajuster, zoomer, dézoomer (ou `Ctrl` + molette) |
+| `Ctrl+G` / `Ctrl+Shift+G` | Afficher la grille / aligner les déplacements dessus |
 | `Suppr` | Supprimer l'élément sélectionné |
 
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 110 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 129 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
