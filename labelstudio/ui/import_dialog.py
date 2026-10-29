@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import copy
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PIL import Image
 from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QTimer, pyqtSignal

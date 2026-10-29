@@ -1,6 +1,5 @@
 """Tests de l'import d'étiquettes de transport : `python -m unittest discover -s tests -v`"""
 
-import io
 import os
 import sys
 import tempfile
@@ -130,7 +129,7 @@ class PresetTests(unittest.TestCase):
         rect = (310, 205, 905, 1010)
         fr = importer.rect_to_fractions(rect, (1240, 1754))
         back = importer.fractions_to_rect(fr, (1240, 1754))
-        for a, b in zip(rect, back):
+        for a, b in zip(rect, back, strict=True):
             self.assertLessEqual(abs(a - b), 2)
 
     def test_preset_applies_to_other_resolution(self):

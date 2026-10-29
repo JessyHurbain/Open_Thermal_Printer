@@ -1,0 +1,7 @@
+# Outils de vérification statique, utilisés par l'intégration continue.
+# Versions fixées : une nouvelle version de ruff ou mypy peut ajouter des règles et faire
+# échouer la CI sans qu'une ligne de code ait changé. À relever volontairement, en corrigeant
+# les nouveaux constats dans le même commit.
+ruff==0.17.3
+mypy==2.4.1
+types-Pillow==10.2.0.20240822  # annotations de Pillow : sans elles, mypy ne voit que du « Any »

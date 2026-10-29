@@ -828,7 +828,8 @@ class ErrorJournalTests(unittest.TestCase):
         diagnostics.setup(self.path)
         diagnostics.setup(self.path)  # rappelable : les gestionnaires précédents sont remplacés
         diagnostics.logger.warning("une seule fois")
-        lines = [l for l in self.path.read_text(encoding="utf-8").splitlines() if "une seule fois" in l]
+        lines = [line for line in self.path.read_text(encoding="utf-8").splitlines()
+                 if "une seule fois" in line]
         self.assertEqual(len(lines), 1)
 
     def test_an_uncaught_exception_writes_the_traceback_and_notifies(self):

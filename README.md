@@ -103,6 +103,16 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 
 La même suite tourne à chaque `push` et à chaque pull request via GitHub Actions ([tests.yml](.github/workflows/tests.yml)), sur Python 3.10 et 3.12, sans écran. Le hook local reste utile pour un retour immédiat ; l'intégration continue rattrape les commits faits avec `--no-verify` ou depuis une autre machine.
 
+La CI lance aussi deux vérificateurs statiques (tâche *Analyse statique*) :
+
+```bash
+python3 -m venv .venv-dev && .venv-dev/bin/pip install -r requirements-dev.txt
+.venv-dev/bin/ruff check .     # imports inutilisés, variables mortes, pièges (E, F, W, B)
+.venv-dev/bin/mypy             # annotations, sur le cœur pour l'instant
+```
+
+`ruff` et `mypy` sont épinglés dans `requirements-dev.txt` : une nouvelle version peut ajouter des règles, et la CI ne doit pas changer de verdict sans qu'une ligne de code ait bougé. Le périmètre de `mypy` est volontairement partiel — `labelstudio/*.py` est vérifié, `labelstudio/ui/*` et `main.py` sont exemptés dans `pyproject.toml` tant que les annotations partielles de PyQt6 n'auront pas été apprivoisées. Les deux outils se configurent dans `pyproject.toml`, pas en ligne de commande, pour que CI et poste local voient exactement la même chose.
+
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 
 **Avant chaque commit.** Le hook versionné `.githooks/pre-commit` lance les tests **concernés par les fichiers indexés** — seulement `tests.test_core` pour une modification de `printer.py`, par exemple — et **refuse le commit** si l'un échoue, en affichant la sortie complète. Une modification de documentation seule ne lance rien ; un module du socle partagé (`models.py`, `renderer.py`…), un fichier global (`requirements.txt`, `tester.sh`, le hook lui-même) ou une suppression de fichier déclenche toute la suite. `git commit --no-verify` permet de passer outre. Le hook s'active par `git config core.hooksPath .githooks`, déjà fait dans ce dépôt — à relancer après un nouveau clone.
@@ -180,6 +190,8 @@ sudo usermod -aG lp,dialout $USER    # puis fermer/rouvrir la session
 main.py                     point d'entrée
 lancer.sh                   lance l'appli (crée le venv au besoin)
 requirements.txt
+requirements-dev.txt        ruff + mypy épinglés (vérification statique)
+pyproject.toml              configuration de ruff et mypy, aucun empaquetage
 labelstudio/
   models.py                 Element / LabelSettings / Label (+ JSON)
   fonts.py                  résolution des polices TrueType (fontconfig)

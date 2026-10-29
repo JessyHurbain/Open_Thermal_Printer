@@ -106,6 +106,7 @@ def pick_native_font(height_dots: int) -> tuple[str, int]:
         score = (abs(fh * mult - height_dots), -fh)
         if best is None or score < best[0]:
             best = (score, font_id, mult)
+    assert best is not None  # NATIVE_FONTS n'est jamais vide
     return best[1], best[2]
 
 

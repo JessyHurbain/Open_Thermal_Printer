@@ -22,7 +22,7 @@ import subprocess
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 CHUNK_SIZE = 512  # octets par écriture : évite de saturer le tampon de l'imprimante
 CHUNK_DELAY = 0.004  # pause entre deux paquets (s)
@@ -120,7 +120,9 @@ class BluetoothConnection(Connection):
             errno.EACCES: "Permission refusée pour le Bluetooth.",
             errno.ETIMEDOUT: "Délai dépassé : l'imprimante ne répond pas (éteinte, hors de portée ou non appairée).",
         }
-        detail = hints.get(exc.errno) or ("Délai dépassé." if isinstance(exc, socket.timeout) else str(exc))
+        detail = hints.get(exc.errno) if exc.errno is not None else None
+        if not detail:
+            detail = "Délai dépassé." if isinstance(exc, socket.timeout) else str(exc)
         return f"Bluetooth {self.mac} (canal {self.channel}) : {detail}"
 
     def close(self) -> None:
@@ -131,17 +133,23 @@ class BluetoothConnection(Connection):
                 self.sock = None
 
     def _write(self, chunk: bytes) -> None:
+        sock = self.sock
+        if sock is None:
+            raise PrinterError("Liaison Bluetooth fermée : rouvrez la connexion.")
         try:
-            self.sock.sendall(chunk)
+            sock.sendall(chunk)
         except OSError as exc:
             raise PrinterError(f"Écriture Bluetooth interrompue : {exc}") from exc
 
     def read(self, size: int = 64, timeout: float = 1.0) -> bytes:
-        ready, _, _ = select.select([self.sock], [], [], timeout)
+        sock = self.sock
+        if sock is None:
+            return b""
+        ready, _, _ = select.select([sock], [], [], timeout)
         if not ready:
             return b""
         try:
-            return self.sock.recv(size)
+            return sock.recv(size)
         except OSError:
             return b""
 
@@ -162,7 +170,9 @@ class UsbLpConnection(Connection):
     """Périphérique caractère /dev/usb/lpN (module noyau usblp)."""
 
     def __init__(self, path: str = "/dev/usb/lp0"):
-        self.path, self.fd, self.can_read = path, None, False
+        self.path = path
+        self.fd: int | None = None
+        self.can_read = False
 
     def open(self) -> None:
         try:
@@ -187,21 +197,25 @@ class UsbLpConnection(Connection):
             self.fd = None
 
     def _write(self, chunk: bytes) -> None:
+        fd = self.fd
+        if fd is None:
+            raise PrinterError(f"{self.path} est fermé : rouvrez la connexion.")
         try:
             view = memoryview(chunk)
             while view:
-                view = view[os.write(self.fd, view) :]
+                view = view[os.write(fd, view) :]
         except OSError as exc:
             raise PrinterError(f"Écriture USB interrompue : {exc}") from exc
 
     def read(self, size: int = 64, timeout: float = 1.0) -> bytes:
-        if not self.can_read:
+        fd = self.fd
+        if not self.can_read or fd is None:
             return b""
-        ready, _, _ = select.select([self.fd], [], [], timeout)
+        ready, _, _ = select.select([fd], [], [], timeout)
         if not ready:
             return b""
         try:
-            return os.read(self.fd, size)
+            return os.read(fd, size)
         except OSError:
             return b""
 
@@ -210,7 +224,8 @@ class SerialConnection(Connection):
     """Port série (/dev/ttyUSB0, /dev/ttyACM0, /dev/rfcomm0…) via pyserial."""
 
     def __init__(self, path: str = "/dev/ttyUSB0", baudrate: int = 115200):
-        self.path, self.baudrate, self.ser = path, int(baudrate), None
+        self.path, self.baudrate = path, int(baudrate)
+        self.ser: Any = None  # pyserial n'embarque pas d'annotations
 
     def open(self) -> None:
         try:
@@ -784,23 +799,26 @@ def _pair_with_pin(mac: str, pin: str, timeout: float) -> str:
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1,
     )
+    stdin, stdout = proc.stdin, proc.stdout
+    if stdin is None or stdout is None:  # PIPE le garantit ; garde-fou explicite
+        raise PrinterError("bluetoothctl n'a pas pu être piloté en interactif.")
     output: list[str] = []
 
     def send(text: str) -> None:
-        proc.stdin.write(text)
-        proc.stdin.flush()
+        stdin.write(text)
+        stdin.flush()
 
     try:
         send(f"pair {mac}\n")
         deadline = time.monotonic() + timeout
         answered = False
         while time.monotonic() < deadline:
-            ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+            ready, _, _ = select.select([stdout], [], [], 0.5)
             if not ready:
                 if proc.poll() is not None:
                     break
                 continue
-            line = proc.stdout.readline()
+            line = stdout.readline()
             if not line:
                 if proc.poll() is not None:
                     break

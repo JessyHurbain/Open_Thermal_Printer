@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  analyse:
+    name: Analyse statique
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Outils
+        run: pip install -r requirements-dev.txt
+      - name: ruff (imports inutilisés, code mort, pièges)
+        run: ruff check .
+      - name: mypy (cœur typé, interface en cours)
+        run: mypy
+
   tests:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-24.04

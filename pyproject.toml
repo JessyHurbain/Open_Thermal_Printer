@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [".venv", "docs"]
+
+[tool.ruff.lint]
+# E/F/W : erreurs de style et de nommage, imports inutilisés ; B : pièges classiques
+# (arguments mutables par défaut, comparaisons douteuses…). Les règles de réécriture
+# (UP, SIM, RUF…) viendraient avec un diff massif : à activer au cas par cas.
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]  # la longueur de ligne est déjà bornée par line-length, sans casser les tableaux
+
+[tool.mypy]
+python_version = "3.10"
+files = ["labelstudio", "main.py"]
+ignore_missing_imports = true  # PIL, qrcode, python-barcode, serial n'embarquent pas d'annotations
+warn_unused_ignores = true
+no_implicit_optional = true
+
+# L'interface s'appuie massivement sur PyQt6, dont les annotations sont partielles
+# (attributs créés dans __init__, valeurs QSettings typées « object ») : elle sera
+# vérifiée progressivement, module par module.
+[[tool.mypy.overrides]]
+module = ["labelstudio.ui.*", "main"]
+ignore_errors = true

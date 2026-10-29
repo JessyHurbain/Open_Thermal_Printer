@@ -18,7 +18,6 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from itertools import groupby
-from typing import Callable
 
 from PIL import Image
 
@@ -75,6 +74,7 @@ class PageSource:
         """Page rasterisée en RGB (les images sont renvoyées telles quelles)."""
         if self._image is not None:
             return self._image.copy()
+        assert self._doc is not None  # sans image, le document PDF est ouvert
         pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(dpi=dpi, alpha=False)
         return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
@@ -158,6 +158,7 @@ class PageSource:
         k = 72 / PREVIEW_DPI
         clip = pymupdf.Rect(rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k)
         zoom = dpi / 72  # une matrice accepte un facteur décimal (le paramètre `dpi` exige un entier)
+        assert self._doc is not None
         pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(
             matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False)
         return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -199,7 +200,7 @@ def _runs(profile: list[int], max_gap: int) -> list[tuple[int, int]]:
 
 def content_bbox(img: Image.Image, white_level: int = 235) -> Rect | None:
     box = _ink_mask(img, white_level).getbbox()
-    return tuple(box) if box else None
+    return (box[0], box[1], box[2], box[3]) if box else None
 
 
 def tighten(img: Image.Image, rect: Rect, pad: int = 0) -> Rect:
@@ -345,7 +346,7 @@ def estimate_module_px(img: Image.Image, max_run: int = 80, min_runs: int = 30) 
         if sum(counts.values()) < min_runs:
             continue
         smooth = {n: counts[n - 1] + counts[n] + counts[n + 1] for n in range(2, max_run + 1)}
-        width = max(smooth, key=smooth.get)
+        width = max(smooth, key=lambda n: smooth[n])
         if best is None or smooth[width] > best[0]:
             best = (smooth[width], width)
     return float(best[1]) if best else None
