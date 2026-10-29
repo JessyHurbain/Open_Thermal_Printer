@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem,
 )
 
-from labelstudio import printer, templates  # noqa: E402
+from labelstudio import diagnostics, printer, templates  # noqa: E402
 from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
 from labelstudio.ui.element_list import (  # noqa: E402
     DETAIL_ROLE, ICON_ROLE, ICON_WIDTH, LEFT_MARGIN, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
@@ -31,6 +31,7 @@ from labelstudio.ui.element_list import (  # noqa: E402
 from labelstudio.ui.canvas import (  # noqa: E402
     GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
 )
+from labelstudio.ui import error_report  # noqa: E402
 from labelstudio.ui.connection_panel import ConnectionPanel  # noqa: E402
 from labelstudio.ui.main_window import ADD_BUTTON_HEIGHT, MainWindow  # noqa: E402
 from labelstudio.ui.pairing_dialog import PairingDialog  # noqa: E402
@@ -521,6 +522,49 @@ class AddButtonTests(unittest.TestCase):
                          pos=caption.geometry().center())
         self.assertEqual(len(self.win.label.elements), before + 1)
         self.assertEqual(self.win.label.elements[-1].kind, "text")
+
+
+class ErrorReportTests(unittest.TestCase):
+    """Erreur inattendue : message court à l'écran, trace complète dans le journal."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = diagnostics.setup(os.path.join(self.tmp.name, "journal.log"))
+        self.addCleanup(diagnostics.restore_hooks)
+        self.addCleanup(diagnostics.reset)
+
+    def test_an_uncaught_exception_opens_a_dialog_pointing_to_the_journal(self):
+        diagnostics.install_hook(error_report.report)
+        try:
+            raise ValueError("liaison perdue")
+        except ValueError:
+            sys.excepthook(*sys.exc_info())
+        pump(0.1)
+        self.assertTrue(error_report._open, "aucune boîte de dialogue n'a été ouverte")
+        box = error_report._open[-1]
+        self.addCleanup(box.close)
+        self.assertIn("ValueError : liaison perdue", box.informativeText())
+        self.assertIn(str(self.log), box.informativeText())
+        self.assertIn("Traceback", self.log.read_text(encoding="utf-8"))
+
+    def test_the_help_menu_offers_the_journal(self):
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        win = MainWindow()
+        win._probe_timer.stop()
+        self.addCleanup(win.deleteLater)
+        texts = [a.text() for m in win.menuBar().actions() if m.menu()
+                 for a in m.menu().actions()]
+        self.assertIn("Ouvrir le journal d'erreurs", texts)
 
 
 class GridMenuTests(unittest.TestCase):

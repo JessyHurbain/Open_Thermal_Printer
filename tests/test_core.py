@@ -1,19 +1,22 @@
 """Tests du cœur (sans interface) : `python -m unittest discover -s tests -v`"""
 
 import errno
+import io
 import os
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stderr
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PIL import Image
 
-from labelstudio import printer, templates
+from labelstudio import diagnostics, printer, templates
 from labelstudio.history import History
 from labelstudio.imaging import invert_bytes, pack_bitmap, to_bilevel
 from labelstudio.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
@@ -787,6 +790,68 @@ class ForgetTests(unittest.TestCase):
             self.assertIn("Délai dépassé", printer.forget_bluetooth("AA:BB:CC:DD:EE:FF").message)
         with mock.patch.object(printer.subprocess, "run", side_effect=FileNotFoundError):
             self.assertIn("bluez", printer.forget_bluetooth("AA:BB:CC:DD:EE:FF").message)
+
+
+class ErrorJournalTests(unittest.TestCase):
+    """Journal d'erreurs : une trace complète dans le fichier, un message court pour l'utilisateur."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / "etat" / "journal.log"
+        self.addCleanup(diagnostics.restore_hooks)
+        self.addCleanup(diagnostics.reset)
+
+    def test_the_journal_creates_its_folder_and_keeps_the_message(self):
+        target = diagnostics.setup(self.path)
+        diagnostics.logger.error("échec de test")
+        self.assertEqual(target, self.path)
+        self.assertIn("échec de test", self.path.read_text(encoding="utf-8"))
+
+    def test_opening_the_journal_twice_does_not_double_the_lines(self):
+        diagnostics.setup(self.path)
+        diagnostics.setup(self.path)  # rappelable : les gestionnaires précédents sont remplacés
+        diagnostics.logger.warning("une seule fois")
+        lines = [l for l in self.path.read_text(encoding="utf-8").splitlines() if "une seule fois" in l]
+        self.assertEqual(len(lines), 1)
+
+    def test_an_uncaught_exception_writes_the_traceback_and_notifies(self):
+        diagnostics.setup(self.path)
+        seen = []
+        diagnostics.install_hook(lambda exc, text: seen.append((exc, text)))
+        self._raise(ValueError("liaison perdue"))
+        self.assertEqual(len(seen), 1)
+        self.assertIsInstance(seen[0][0], ValueError)
+        content = self.path.read_text(encoding="utf-8")
+        self.assertIn("Traceback", content)
+        self.assertIn("ValueError: liaison perdue", content)
+
+    def test_the_notifications_stop_when_the_same_error_loops(self):
+        """Une exception répétée par un minuteur ne doit pas empiler les boîtes de dialogue."""
+        diagnostics.setup(self.path)
+        seen = []
+        diagnostics.install_hook(lambda *a: seen.append(a))
+        for _ in range(diagnostics.MAX_DIALOGS + 2):
+            self._raise(RuntimeError("boucle"))
+        self.assertEqual(len(seen), diagnostics.MAX_DIALOGS)
+        self.assertEqual(self.path.read_text(encoding="utf-8").count("RuntimeError: boucle"),
+                         diagnostics.MAX_DIALOGS + 2)
+
+    def test_ctrl_c_stays_a_plain_interruption(self):
+        seen = []
+        diagnostics.install_hook(lambda *a: seen.append(a))
+        with redirect_stderr(io.StringIO()):
+            sys.excepthook(KeyboardInterrupt, KeyboardInterrupt(), None)
+        self.assertEqual(seen, [])
+
+    @staticmethod
+    def _raise(exc: Exception) -> None:
+        """Provoque une exception que l'on passe au crochet, comme le ferait Python."""
+        try:
+            raise exc
+        except type(exc):
+            info = sys.exc_info()
+            sys.excepthook(info[0], info[1], info[2])
 
 
 if __name__ == "__main__":

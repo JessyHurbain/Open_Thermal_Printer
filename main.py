@@ -5,6 +5,8 @@ import sys
 
 from PyQt6.QtWidgets import QApplication
 
+from labelstudio import diagnostics
+from labelstudio.ui import error_report
 from labelstudio.ui.main_window import MainWindow
 
 
@@ -22,6 +24,9 @@ def apply_style(app: QApplication) -> None:
 def main() -> int:
     app = QApplication(sys.argv)
     apply_style(app)
+    # Sans terminal, une exception ne laisserait aucune trace : journal + boîte de dialogue.
+    diagnostics.setup()
+    diagnostics.install_hook(error_report.report)
     window = MainWindow()
     window.show()
     return app.exec()

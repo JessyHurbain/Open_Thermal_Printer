@@ -9,9 +9,10 @@ from datetime import datetime
 
 from PIL import ImageOps
 
-from PyQt6.QtCore import QRect, QSettings, Qt, QTimer
+from PyQt6.QtCore import QRect, QSettings, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
-    QAction, QActionGroup, QColor, QFont, QFontMetrics, QIcon, QImage, QKeySequence, QPainter, QPixmap,
+    QAction, QActionGroup, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QImage, QKeySequence,
+    QPainter, QPixmap,
 )
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import __version__, importer, printer, templates
+from .. import __version__, diagnostics, importer, printer, templates
 from ..history import History
 from .element_list import DETAIL_ROLE, ICON_ROLE, ElementItemDelegate
 from ..imaging import encode_image_file
@@ -293,6 +294,7 @@ class MainWindow(QMainWindow):
         self.a_snap.setCheckable(True)
         self.a_snap.setChecked(self.snap_on)
         a_about = act("À propos", self.about)
+        a_journal = act("Ouvrir le journal d'erreurs", self.open_error_log)
 
         m = self.menuBar()
         mf = m.addMenu("&Fichier")
@@ -332,7 +334,9 @@ class MainWindow(QMainWindow):
         mi.addAction(self.a_detect)
         mi.addAction(self.a_test)
         mi.addAction(self.a_print)
-        m.addMenu("&Aide").addAction(a_about)
+        ma = m.addMenu("&Aide")
+        ma.addAction(a_journal)
+        ma.addAction(a_about)
 
         # Barre d'outils volontairement réduite aux gestes courants, en libellés courts : les
         # menus restent la référence complète (avec raccourcis), pour ne pas tout afficher deux fois.
@@ -688,6 +692,16 @@ class MainWindow(QMainWindow):
     def log(self, message: str) -> None:
         self.log_view.appendPlainText(f"[{datetime.now():%H:%M:%S}] {message}")
         self.statusBar().showMessage(message.splitlines()[0], 8000)
+        diagnostics.logger.info(message)  # même trace dans le journal, pour un diagnostic ultérieur
+
+    def open_error_log(self) -> None:
+        """Ouvre le journal dans l'éditeur ; le chemin est affiché s'il n'existe pas encore."""
+        path = diagnostics.log_path()
+        if not path.exists():
+            QMessageBox.information(self, "Journal d'erreurs",
+                                    f"Aucune erreur enregistrée pour l'instant.\n\nFichier : {path}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _run(self, fn, busy_text: str, on_ok, failure_title: str = "Erreur d'impression",
              inspect_commands: bool = True) -> None:
