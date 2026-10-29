@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PIL import Image, ImageDraw
 
-from labelstudio import importer
+from open_thermal_printer import importer
 
 
 def page_with_label(box=(300, 200, 900, 1000), size=(1240, 1754)) -> Image.Image:
@@ -248,7 +248,7 @@ class SourceTests(unittest.TestCase):
 def vector_barcode_pdf(path, module_mm=0.33, text="MONDIAL RELAY Vinted", pages=1):
     """PDF A4 avec un cadre d'étiquette, du texte et un Code 128 vectoriel (barres exactes)."""
     import pymupdf
-    from labelstudio.renderer import barcode_modules
+    from open_thermal_printer.renderer import barcode_modules
 
     bits, _ = barcode_modules("code128", "MR0123456789")
     doc = pymupdf.open()
@@ -362,7 +362,7 @@ class CarrierTests(unittest.TestCase):
 
 class BatchTests(unittest.TestCase):
     def test_send_jobs_one_connection_all_frames_in_order(self):
-        from labelstudio import printer
+        from open_thermal_printer import printer
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             path = tmp.name

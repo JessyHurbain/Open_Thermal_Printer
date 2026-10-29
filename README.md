@@ -197,7 +197,7 @@ lancer.sh                   lance l'appli (crée le venv au besoin)
 requirements.txt
 requirements-dev.txt        ruff + mypy épinglés (vérification statique)
 pyproject.toml              configuration de ruff et mypy, aucun empaquetage
-labelstudio/
+open_thermal_printer/
   models.py                 Element / LabelSettings / Label (+ JSON)
   fonts.py                  résolution des polices TrueType (fontconfig)
   imaging.py                N&B, tramage, rotation, encodage binaire des bitmaps

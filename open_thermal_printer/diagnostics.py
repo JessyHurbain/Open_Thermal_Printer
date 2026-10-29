@@ -25,7 +25,7 @@ MAX_BYTES = 512 * 1024  # au-delà, le journal tourne sur deux sauvegardes
 BACKUPS = 2
 MAX_DIALOGS = 3  # arrête la pluie de boîtes si une exception se répète en boucle
 
-logger = logging.getLogger("labelstudio")
+logger = logging.getLogger("open_thermal_printer")
 _notified = 0
 _active: Path | None = None  # chemin réellement ouvert, s'il a été imposé (tests, ligne de commande)
 

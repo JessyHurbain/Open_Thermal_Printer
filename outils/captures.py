@@ -31,9 +31,9 @@ from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from labelstudio import printer, templates  # noqa: E402
-from labelstudio.ui.import_dialog import ImportDialog  # noqa: E402
-from labelstudio.ui.main_window import MainWindow  # noqa: E402
+from open_thermal_printer import printer, templates  # noqa: E402
+from open_thermal_printer.ui.import_dialog import ImportDialog  # noqa: E402
+from open_thermal_printer.ui.main_window import MainWindow  # noqa: E402
 
 OUT = ROOT / "docs" / "screenshots"
 SHOTS = ("editeur", "element", "connexion", "import")

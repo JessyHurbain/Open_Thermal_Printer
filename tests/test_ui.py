@@ -23,20 +23,20 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
 )
 
-from labelstudio import APP_NAME, diagnostics, printer, templates  # noqa: E402
-from labelstudio.settings import LEGACY, MIGRATED_KEY, migrate  # noqa: E402
-from labelstudio.settings import settings as app_settings  # noqa: E402
-from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
-from labelstudio.ui.element_list import (  # noqa: E402
+from open_thermal_printer import APP_NAME, diagnostics, printer, templates  # noqa: E402
+from open_thermal_printer.settings import LEGACY, MIGRATED_KEY, migrate  # noqa: E402
+from open_thermal_printer.settings import settings as app_settings  # noqa: E402
+from open_thermal_printer.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
+from open_thermal_printer.ui.element_list import (  # noqa: E402
     DETAIL_ROLE, ICON_ROLE, ICON_WIDTH, LEFT_MARGIN, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
 )
-from labelstudio.ui.canvas import (  # noqa: E402
+from open_thermal_printer.ui.canvas import (  # noqa: E402
     GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
 )
-from labelstudio.ui import error_report  # noqa: E402
-from labelstudio.ui.connection_panel import ConnectionPanel  # noqa: E402
-from labelstudio.ui.main_window import ADD_BUTTON_HEIGHT, GLYPH_SIZE, MainWindow  # noqa: E402
-from labelstudio.ui.pairing_dialog import PairingDialog  # noqa: E402
+from open_thermal_printer.ui import error_report  # noqa: E402
+from open_thermal_printer.ui.connection_panel import ConnectionPanel  # noqa: E402
+from open_thermal_printer.ui.main_window import ADD_BUTTON_HEIGHT, GLYPH_SIZE, MainWindow  # noqa: E402
+from open_thermal_printer.ui.pairing_dialog import PairingDialog  # noqa: E402
 
 _APP: QApplication | None = None
 _SETTINGS_DIR: tempfile.TemporaryDirectory | None = None
@@ -170,7 +170,7 @@ class MainWindowConnectionTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()
@@ -447,7 +447,7 @@ class ElementListTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()
@@ -518,7 +518,7 @@ class AddButtonTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()
@@ -569,7 +569,7 @@ class ToolbarTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()
@@ -619,7 +619,7 @@ class ErrorReportTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         probe = mock.patch.object(printer, "test_connection",
@@ -645,7 +645,7 @@ class GridMenuTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         # Réglages neutres avant la construction : chaque test part d'un état connu.
@@ -703,7 +703,7 @@ class UndoTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()
@@ -815,7 +815,7 @@ class ProbeSessionTests(unittest.TestCase):
         for patch in patched_discovery():
             patch.start()
             self.addCleanup(patch.stop)
-        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
         single.start()
         self.addCleanup(single.stop)
         self.win = MainWindow()

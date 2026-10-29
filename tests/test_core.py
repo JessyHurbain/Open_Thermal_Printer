@@ -16,13 +16,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PIL import Image
 
-from labelstudio import diagnostics, printer, templates
-from labelstudio.history import History
-from labelstudio.imaging import invert_bytes, pack_bitmap, to_bilevel
-from labelstudio.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
-from labelstudio.renderer import printer_anchor, render_element, render_label, warnings_for
-from labelstudio.tspl import build_tspl
-from labelstudio.zpl import build_zpl
+from open_thermal_printer import diagnostics, printer, templates
+from open_thermal_printer.history import History
+from open_thermal_printer.imaging import invert_bytes, pack_bitmap, to_bilevel
+from open_thermal_printer.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
+from open_thermal_printer.renderer import printer_anchor, render_element, render_label, warnings_for
+from open_thermal_printer.tspl import build_tspl
+from open_thermal_printer.zpl import build_zpl
 
 
 def one(el: Element, **settings) -> Label:

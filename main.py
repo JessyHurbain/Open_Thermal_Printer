@@ -6,10 +6,10 @@ import sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from labelstudio import APP_NAME, diagnostics
-from labelstudio import settings as app_settings
-from labelstudio.ui import error_report
-from labelstudio.ui.main_window import MainWindow
+from open_thermal_printer import APP_NAME, diagnostics
+from open_thermal_printer import settings as app_settings
+from open_thermal_printer.ui import error_report
+from open_thermal_printer.ui.main_window import MainWindow
 
 
 def apply_style(app: QApplication) -> None:
