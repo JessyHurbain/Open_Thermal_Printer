@@ -573,16 +573,48 @@ class MainWindow(QMainWindow):
         lang = self.label.settings.language
 
         def ok(detection):
-            self.conn_panel.apply_detection(detection)
             for device in detection.devices:
                 self.log("• " + device.label)
             self.log(detection.summary())
             if detection.result is not None:
                 self.log(("✔ " if detection.result.ok else "✘ ") + detection.result.message)
+            if detection.chosen is not None and not self._confirm_replacement(self.conn_panel.config(),
+                                                                             detection.chosen):
+                self.log("Détection ignorée : la connexion actuelle est conservée.")
+                self.conn_panel.set_status("Détection ignorée : la connexion actuelle est conservée.")
+                return
+            self.conn_panel.apply_detection(detection)
 
         self._run(lambda progress, message: printer.detect_printer(progress, message, lang),
                   "Recherche de l'imprimante…", ok,
                   failure_title="Détection de l'imprimante", inspect_commands=False)
+
+    @staticmethod
+    def _connection_key(cfg: dict) -> tuple[str, str]:
+        """Identité d'une connexion : mode + adresse MAC ou chemin du port."""
+        return (cfg.get("type") or "", (cfg.get("mac") or cfg.get("path") or "").strip().upper())
+
+    @staticmethod
+    def _describe_connection(cfg: dict) -> str:
+        kind, address = MainWindow._connection_key(cfg)
+        return {"bluetooth": f"Bluetooth {address}", "usb": f"USB {address}",
+                "serial": f"port série {address}"}.get(kind, kind or "non configurée")
+
+    def _confirm_replacement(self, cfg: dict, device: printer.Device) -> bool:
+        """Vrai si la détection peut remplacer la connexion : vide, identique, injoignable, ou acceptée."""
+        current = self._connection_key(cfg)
+        if not current[1] or current == self._connection_key(device.config):
+            return True
+        if self._printer_ok is False:  # imprimante déjà constatée injoignable : la remplacer est utile
+            return True
+        answer = QMessageBox.question(
+            self, "Remplacer la connexion ?",
+            f"La connexion actuelle — {self._describe_connection(cfg)} — est conservée par défaut.\n\n"
+            f"La remplacer par {device.label} ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def test_connection(self) -> None:
         cfg, lang = self.conn_panel.config(), self.label.settings.language
