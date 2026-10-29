@@ -6,8 +6,10 @@ import copy
 import os
 from datetime import datetime
 
+from PIL import ImageOps
+
 from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar,
@@ -19,7 +21,7 @@ from ..history import History
 from .element_list import DETAIL_ROLE, ICON_ROLE, ElementItemDelegate
 from ..imaging import encode_image_file
 from ..models import KIND_ICONS, KIND_LABELS, Element, Label
-from ..renderer import render_label, warnings_for
+from ..renderer import render_element, render_label, warnings_for
 from ..tspl import build_tspl
 from ..zpl import build_zpl
 from .canvas import LabelCanvas
@@ -319,12 +321,31 @@ class MainWindow(QMainWindow):
         self.elements_list.setCurrentRow(select)
         self.elements_list.blockSignals(False)
 
-    @staticmethod
-    def _fill_element_item(item: QListWidgetItem, el: Element) -> None:
-        """Deux lignes : le titre dans le texte de l'item, icône et détail dans des rôles."""
+    def _fill_element_item(self, item: QListWidgetItem, el: Element) -> None:
+        """Deux lignes : titre dans le texte, miniature et détail dans les rôles."""
         item.setText(el.list_title())
-        item.setData(ICON_ROLE, KIND_ICONS.get(el.kind, ""))
+        item.setData(ICON_ROLE, KIND_ICONS.get(el.kind, ""))  # secours si le rendu échoue
         item.setData(DETAIL_ROLE, el.list_detail())
+        item.setIcon(QIcon(self._element_thumb(el)))
+
+    def _element_thumb(self, el: Element, box: int = 28) -> QPixmap:
+        """Miniature du rendu réel de l'élément, sur fond blanc, pour la liste."""
+        pix = QPixmap(box, box)
+        pix.fill(QColor("white"))
+        try:
+            image = render_element(el, self.label.settings).img.convert("L")
+        except Exception:
+            return pix  # miniature vide : la liste affichera l'icône du type
+        image.thumbnail((box - 4, box - 4))  # ratio conservé
+        # Un trait fin (cadre de 0,5 mm) devient presque blanc une fois réduit :
+        # l'étirement des niveaux le rend à nouveau visible à cette taille.
+        image = ImageOps.autocontrast(image)
+        buf = image.tobytes()
+        qimage = QImage(buf, image.width, image.height, image.width, QImage.Format.Format_Grayscale8)
+        painter = QPainter(pix)
+        painter.drawImage((box - image.width) // 2, (box - image.height) // 2, qimage)
+        painter.end()
+        return pix
 
     def _selected_index(self) -> int:
         return self.canvas.selected if 0 <= self.canvas.selected < len(self.label.elements) else -1

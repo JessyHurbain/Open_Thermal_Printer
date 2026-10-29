@@ -23,7 +23,9 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem  # n
 
 from labelstudio import printer, templates  # noqa: E402
 from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
-from labelstudio.ui.element_list import DETAIL_ROLE, ICON_ROLE, ROW_HEIGHT, ElementItemDelegate  # noqa: E402
+from labelstudio.ui.element_list import (  # noqa: E402
+    DETAIL_ROLE, ICON_ROLE, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
+)
 from labelstudio.ui.canvas import (  # noqa: E402
     GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
 )
@@ -419,8 +421,26 @@ class ElementListTests(unittest.TestCase):
         item = self.win.elements_list.item(0)
         el = self.win.label.elements[0]
         self.assertEqual(item.text(), el.list_title())
-        self.assertEqual(item.data(ICON_ROLE), KIND_ICONS[el.kind])
+        self.assertEqual(item.data(ICON_ROLE), KIND_ICONS[el.kind])  # secours du délégué
         self.assertEqual(item.data(DETAIL_ROLE), el.list_detail())
+        self.assertFalse(item.icon().isNull())
+
+    def test_thumbnails_show_the_rendered_element(self):
+        for row in range(self.win.elements_list.count()):
+            item = self.win.elements_list.item(row)
+            image = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE).toImage()
+            dark = sum(1 for x in range(image.width()) for y in range(image.height())
+                       if image.pixelColor(x, y).lightness() < 128)
+            self.assertGreater(dark, 0, f"miniature vide : {item.text()}")
+
+    def test_thumbnail_follows_the_element_settings(self):
+        row = next(i for i, el in enumerate(self.win.label.elements) if el.kind == "barcode")
+        self.win._select(row)
+        item = self.win.elements_list.item(row)
+        before = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE).toImage()
+        self.win.element_panel.bar_height.setValue(30.0)
+        after = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE).toImage()
+        self.assertNotEqual(before, after)
 
     def test_rows_are_tall_enough_for_two_lines(self):
         items = self.win.elements_list
