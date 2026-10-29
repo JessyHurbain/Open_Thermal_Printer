@@ -86,7 +86,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 91 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 110 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -94,6 +94,15 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 
 **Avant chaque commit.** Le hook versionné `.githooks/pre-commit` lance les tests **concernés par les fichiers indexés** — seulement `tests.test_core` pour une modification de `printer.py`, par exemple — et **refuse le commit** si l'un échoue, en affichant la sortie complète. Une modification de documentation seule ne lance rien ; un module du socle partagé (`models.py`, `renderer.py`…), un fichier global (`requirements.txt`, `tester.sh`, le hook lui-même) ou une suppression de fichier déclenche toute la suite. `git commit --no-verify` permet de passer outre. Le hook s'active par `git config core.hooksPath .githooks`, déjà fait dans ce dépôt — à relancer après un nouveau clone.
+
+## Régénérer les captures
+
+```bash
+./captures.sh               # les quatre images de docs/screenshots
+./captures.sh import        # une seule (editeur, element, connexion, import)
+```
+
+Les captures du tutoriel sont produites **par l'application elle-même**, en Qt `offscreen`, pas fabriquées à la main : un changement d'interface se reflète donc en relançant le script. Il n'exige ni écran ni imprimante — `QSettings` pointe vers un dossier temporaire, la vérification périodique de l'imprimante est neutralisée et l'appareil Bluetooth affiché est fictif (`PM-241-BT`, `AA:BB:CC:DD:EE:FF`). Le bordereau de démonstration de la capture d'import est dessiné par le script : noms, adresses et numéro de suivi y sont inventés.
 
 ## Imprimer des étiquettes Vinted / Leboncoin
 
@@ -167,7 +176,9 @@ labelstudio/
   importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
-tests/                      91 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      110 tests : cœur, import, et interface hors écran (./tester.sh)
+captures.sh                 régénère les captures du README
+outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
 ```
 
