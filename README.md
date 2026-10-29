@@ -44,12 +44,13 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 
 ```bash
 ./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 91 tests
+./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
 
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 
-**Avant chaque commit.** Le hook versionné `.githooks/pre-commit` lance `./tester.sh` et **refuse le commit** si un test échoue, en affichant la sortie complète ; `git commit --no-verify` permet de passer outre. Il s'active par `git config core.hooksPath .githooks`, déjà fait dans ce dépôt — à relancer après un nouveau clone.
+**Avant chaque commit.** Le hook versionné `.githooks/pre-commit` lance les tests **concernés par les fichiers indexés** — seulement `tests.test_core` pour une modification de `printer.py`, par exemple — et **refuse le commit** si l'un échoue, en affichant la sortie complète. Une modification de documentation seule ne lance rien ; un module du socle partagé (`models.py`, `renderer.py`…), un fichier global (`requirements.txt`, `tester.sh`, le hook lui-même) ou une suppression de fichier déclenche toute la suite. `git commit --no-verify` permet de passer outre. Le hook s'active par `git config core.hooksPath .githooks`, déjà fait dans ce dépôt — à relancer après un nouveau clone.
 
 ## Imprimer des étiquettes Vinted / Leboncoin
 

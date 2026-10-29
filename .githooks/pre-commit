@@ -1,10 +1,58 @@
 #!/usr/bin/env bash
-# Hook pre-commit : refuse un commit si la suite de tests échoue.
+# Hook pre-commit : lance les tests concernés par les fichiers indexés et refuse le commit si
+# l'un échoue. Un fichier global (dépendances, script, hook lui-même) déclenche toute la suite.
 # Actif après : git config core.hooksPath .githooks   (déjà configuré dans ce dépôt)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-if ! output=$(./tester.sh 2>&1); then
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged" ] && [ -z "$(git diff --cached --name-only --diff-filter=D)" ]; then
+    exit 0
+fi
+
+full=0
+modules=""
+while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    case "$path" in
+        # tests modifiés : eux seuls
+        tests/test_core.py)       modules="$modules tests.test_core" ;;
+        tests/test_importer.py)   modules="$modules tests.test_importer" ;;
+        tests/test_ui.py)         modules="$modules tests.test_ui" ;;
+        tests/*)                  full=1 ;;
+        # import : le module et le cœur qu'il utilise
+        labelstudio/importer.py|labelstudio/ui/import_dialog.py)
+                                  modules="$modules tests.test_importer tests.test_core" ;;
+        # interface : elle s'appuie sur le cœur (printer, modèles, rendu)
+        labelstudio/ui/*)         modules="$modules tests.test_ui tests.test_core" ;;
+        # printer est utilisé directement par la fenêtre principale
+        labelstudio/printer.py)   modules="$modules tests.test_core tests.test_ui" ;;
+        # modèles, rendu, trames : socle partagé par l'application et l'import
+        labelstudio/*)            full=1 ;;
+        # documentation seule : aucun code exécuté, rien à vérifier
+        *.md|.gitignore)          ;;
+        *)                        full=1 ;;
+    esac
+done <<< "$staged"
+
+if [ -n "$(git diff --cached --name-only --diff-filter=D)" ]; then
+    full=1  # une suppression peut casser des imports : on vérifie tout
+fi
+
+if [ "$full" -eq 1 ]; then
+    echo "→ Suite complète (socle partagé, fichier global ou suppression)"
+    cmd=(./tester.sh)
+elif [ -n "${modules// /}" ]; then
+    selection=$(printf '%s\n' $modules | sort -u | paste -sd' ' -)
+    echo "→ Tests ciblés : $selection"
+    # shellcheck disable=SC2206
+    cmd=(./tester.sh $selection)
+else
+    echo "→ Aucun test concerné (documentation uniquement)"
+    exit 0
+fi
+
+if ! output=$("${cmd[@]}" 2>&1); then
     printf '%s\n' "$output"
     echo ""
     echo "✘ Tests en échec : commit annulé (git commit --no-verify pour forcer)."
