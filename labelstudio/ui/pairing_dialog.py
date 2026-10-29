@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QRegularExpression, QSettings, Qt, QTimer
+from PyQt6.QtGui import QFont, QRegularExpressionValidator
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .. import printer
@@ -22,16 +22,32 @@ class PairingDialog(QDialog):
         self.mac: str | None = None  # adresse retenue, lue par la fenêtre principale après acceptation
         self._worker: Worker | None = None
         self._accepted = False
+        self._settings = QSettings("PhomemoLabelStudio", "LabelStudio")
 
         root = QVBoxLayout(self)
         hint = QLabel("Allumez l'imprimante et mettez-la en mode appairage, puis lancez la recherche. "
-                      "L'application appaire l'appareil choisi et l'approuve ; le code PIN par défaut (0000) "
-                      "est utilisé.")
+                      "L'application appaire l'appareil choisi et l'approuve, en envoyant le code PIN "
+                      "ci-dessous (0000 par défaut).")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
         self.list = QListWidget()
         root.addWidget(self.list, 1)
+
+        pin_row = QHBoxLayout()
+        pin_row.addWidget(QLabel("Code PIN"))
+        self.pin = QLineEdit(str(self._settings.value("pair/pin", "0000")))
+        self.pin.setMaxLength(6)
+        self.pin.setFixedWidth(70)
+        self.pin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pin.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,6}"), self))
+        self.pin.setToolTip("Code demandé par l'imprimante : 0000 le plus souvent, parfois 1234")
+        pin_row.addWidget(self.pin)
+        pin_hint = QLabel("0000 le plus souvent, parfois 1234")
+        pin_hint.setStyleSheet("color: gray;")
+        pin_row.addWidget(pin_hint)
+        pin_row.addStretch(1)
+        root.addLayout(pin_row)
 
         row = QHBoxLayout()
         self.scan_btn = QPushButton("Rechercher")
@@ -64,6 +80,7 @@ class PairingDialog(QDialog):
         self.scan_btn.setEnabled(not busy)
         self.pair_btn.setEnabled(not busy and self.list.currentItem() is not None)
         self.list.setEnabled(not busy)
+        self.pin.setEnabled(not busy)
 
     def _set_status(self, text: str, tone: str = "gray") -> None:
         self.status.setStyleSheet(f"color: {tone};")
@@ -124,8 +141,10 @@ class PairingDialog(QDialog):
             return
         mac = item.data(Qt.ItemDataRole.UserRole)
         name = item.data(Qt.ItemDataRole.UserRole + 1) or ""
+        pin = self.pin.text().strip() or "0000"
+        self._settings.setValue("pair/pin", pin)
         self._set_status(f"Appairage de {name or mac}… l'imprimante peut demander une confirmation.")
-        self._start(lambda progress, message: printer.pair_bluetooth(mac, name),
+        self._start(lambda progress, message: printer.pair_bluetooth(mac, name, pin=pin),
                     lambda result: self._paired(result, mac))
 
     def _paired(self, result, mac: str) -> None:

@@ -527,12 +527,13 @@ def _bluetoothctl(args: list[str], timeout: float) -> subprocess.CompletedProces
     )
 
 
-def _pair_error(low: str, raw: str, label: str) -> str:
+def _pair_error(low: str, raw: str, label: str, pin: str = "0000") -> str:
     """Message d'erreur lisible à partir de la sortie de bluetoothctl."""
     if "authentication" in low or "pin" in low:
         return (f"Appairage refusé pour {label} : code PIN incorrect ou demande annulée. "
-                "L'application utilise 0000 ; si l'imprimante en exige un autre, appairez-la une fois "
-                "avec l'outil Bluetooth de Linux Mint.")
+                f"L'application a envoyé {pin} ; essayez le code demandé par l'imprimante "
+                "(0000 par défaut, parfois 1234), ou appairez-la une fois avec l'outil Bluetooth "
+                "de Linux Mint.")
     if "not available" in low or "does not exist" in low or "doesnotexist" in low:
         return (f"{label} n'est plus visible : relancez la recherche, imprimante allumée et en mode appairage.")
     if "in progress" in low:
@@ -541,28 +542,94 @@ def _pair_error(low: str, raw: str, label: str) -> str:
     return f"Échec de l'appairage de {label} : {detail[:120]}"
 
 
-def pair_bluetooth(mac: str, name: str = "", timeout: float = 30.0) -> PairResult:
+def _pair_with_pin(mac: str, pin: str, timeout: float) -> str:
+    """Pilote `bluetoothctl` en interactif pour saisir le code PIN demandé par l'imprimante.
+
+    L'agent « NoInputNoOutput » répond toujours 0000 ; pour un autre code, il faut un agent qui
+    saisit réellement le PIN, donc une session interactive dont on lit les invites. Renvoie la
+    sortie complète, analysée comme celle de `bluetoothctl pair`.
+    """
+    proc = subprocess.Popen(
+        ["bluetoothctl", "--agent", "KeyboardDisplay"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    output: list[str] = []
+
+    def send(text: str) -> None:
+        proc.stdin.write(text)
+        proc.stdin.flush()
+
+    try:
+        send(f"pair {mac}\n")
+        deadline = time.monotonic() + timeout
+        answered = False
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                continue
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                continue
+            output.append(line)
+            low = line.lower()
+            try:
+                if ("pin" in low or "passkey" in low) and "?" not in low and not answered:
+                    send(f"{pin}\n")
+                    answered = True
+                elif "confirm" in low and ("yes" in low or "no" in low):
+                    send("yes\n")  # passkey affiché par l'appareil : on l'accepte
+            except OSError:  # bluetoothctl s'est arrêté entre-temps
+                break
+            if "pairing successful" in low or "failed" in low:
+                break
+        else:
+            raise subprocess.TimeoutExpired("bluetoothctl", timeout)
+    finally:
+        try:
+            send("quit\n")
+        except (OSError, ValueError):
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    return "".join(output)
+
+
+def pair_bluetooth(mac: str, name: str = "", timeout: float = 30.0, pin: str = "0000") -> PairResult:
     """Appaire puis approuve (`trust`) une imprimante Bluetooth, sans passer par le terminal.
 
-    BlueZ est piloté par `bluetoothctl` avec l'agent « NoInputNoOutput » : il répond 0000 aux
-    demandes de PIN des imprimantes, ce qui couvre les Phomemo. Le résultat porte un message
-    directement affichable dans l'interface.
+    Avec le code par défaut (0000), BlueZ est piloté par l'agent « NoInputNoOutput », qui répond
+    0000 aux demandes de l'imprimante — le cas des Phomemo. Un autre code est saisi à la main par
+    un agent interactif, BlueZ n'acceptant pas de PIN imposé autrement. Le résultat porte un
+    message directement affichable dans l'interface.
     """
     mac = (mac or "").strip().upper()
     if not MAC_RE.match(mac):
         return PairResult(False, "Adresse MAC invalide (format attendu : AA:BB:CC:DD:EE:FF).")
+    pin = (pin or "0000").strip()
+    if not pin.isdigit() or not 4 <= len(pin) <= 6:
+        return PairResult(False, "Code PIN invalide : 4 à 6 chiffres (0000 par défaut).")
     label = name or mac
     try:
-        paired = _bluetoothctl(["pair", mac], timeout)
+        if pin == "0000":
+            paired = _bluetoothctl(["pair", mac], timeout)
+            raw = f"{paired.stdout}\n{paired.stderr}"
+        else:
+            raw = _pair_with_pin(mac, pin, timeout)
     except FileNotFoundError:
         return PairResult(False, "bluetoothctl est introuvable : installez BlueZ (sudo apt install bluez).")
     except subprocess.TimeoutExpired:
         return PairResult(False, f"Délai dépassé pour {label} : allumez l'imprimante, mettez-la en mode "
                                  "appairage, puis réessayez.")
-    raw = f"{paired.stdout}\n{paired.stderr}"
     low = raw.lower()
     if "pairing successful" not in low and "alreadyexists" not in low:
-        return PairResult(False, _pair_error(low, raw, label))
+        return PairResult(False, _pair_error(low, raw, label, pin))
 
     try:
         trusted = _bluetoothctl(["trust", mac], timeout)

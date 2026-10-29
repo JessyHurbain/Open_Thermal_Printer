@@ -355,6 +355,65 @@ class PairTests(unittest.TestCase):
         self.assertTrue(printer.looks_like_printer("Thermal Printer"))
         self.assertFalse(printer.looks_like_printer("WH-CH700N"))
 
+    def test_custom_pin_uses_the_interactive_agent(self):
+        with mock.patch.object(printer, "_pair_with_pin", return_value="Pairing successful\n") as typed, \
+             mock.patch.object(printer, "_bluetoothctl", return_value=self._done("trust succeeded\n")):
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF", "PM-241-BT", pin="1234")
+        self.assertTrue(result.ok)
+        typed.assert_called_once_with("AA:BB:CC:DD:EE:FF", "1234", 30.0)
+
+    def test_pin_is_typed_when_the_agent_asks(self):
+        class Sink:
+            def __init__(self):
+                self.data = []
+
+            def write(self, text):
+                self.data.append(text)
+
+            def flush(self):
+                pass
+
+        class Out:
+            def __init__(self, lines):
+                self.lines = list(lines)
+
+            def readline(self):
+                return self.lines.pop(0) if self.lines else ""
+
+        class Proc:
+            def __init__(self):
+                self.stdin = Sink()
+                self.stdout = Out(["[CHG] Device AA:BB:CC:DD:EE:FF RSSI: -40\n",
+                                   "[agent] Enter PIN code: ",
+                                   "Pairing successful\n"])
+                self.returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        proc = Proc()
+        with mock.patch.object(printer.subprocess, "Popen", return_value=proc), \
+             mock.patch.object(printer.select, "select", return_value=([proc.stdout], [], [])):
+            output = printer._pair_with_pin("AA:BB:CC:DD:EE:FF", "1234", 5)
+        self.assertIn("pair AA:BB:CC:DD:EE:FF\n", proc.stdin.data)
+        self.assertIn("1234\n", proc.stdin.data)
+        self.assertIn("Pairing successful", output)
+
+    def test_invalid_pin_is_rejected_without_pairing(self):
+        with mock.patch.object(printer, "_pair_with_pin") as typed, \
+             mock.patch.object(printer.subprocess, "run") as run:
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF", pin="12")
+        self.assertFalse(result.ok)
+        self.assertIn("4 à 6 chiffres", result.message)
+        typed.assert_not_called()
+        run.assert_not_called()
+
 
 class ForgetTests(unittest.TestCase):
     @staticmethod
