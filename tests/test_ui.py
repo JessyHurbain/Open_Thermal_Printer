@@ -20,7 +20,7 @@ from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
 from PyQt6.QtGui import QColor, QIcon, QMouseEvent, QPixmap  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
-    QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem,
+    QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
 )
 
 from labelstudio import diagnostics, printer, templates  # noqa: E402
@@ -33,7 +33,7 @@ from labelstudio.ui.canvas import (  # noqa: E402
 )
 from labelstudio.ui import error_report  # noqa: E402
 from labelstudio.ui.connection_panel import ConnectionPanel  # noqa: E402
-from labelstudio.ui.main_window import ADD_BUTTON_HEIGHT, MainWindow  # noqa: E402
+from labelstudio.ui.main_window import ADD_BUTTON_HEIGHT, GLYPH_SIZE, MainWindow  # noqa: E402
 from labelstudio.ui.pairing_dialog import PairingDialog  # noqa: E402
 
 _APP: QApplication | None = None
@@ -522,6 +522,39 @@ class AddButtonTests(unittest.TestCase):
                          pos=caption.geometry().center())
         self.assertEqual(len(self.win.label.elements), before + 1)
         self.assertEqual(self.win.label.elements[-1].kind, "text")
+
+
+class ToolbarTests(unittest.TestCase):
+    """Barre d'outils : boutons de même hauteur, chacun avec une icône de taille fixe."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+        self.win.resize(1440, 900)
+        self.win.show()  # sinon les boutons n'ont pas encore leur hauteur réelle
+        QApplication.processEvents()
+        toolbar = self.win.findChild(QToolBar)
+        self.buttons = [b for b in toolbar.findChildren(QToolButton) if b.text()]
+
+    def test_buttons_share_one_height_and_a_fixed_icon_size(self):
+        self.assertEqual(len(self.buttons), 6)
+        heights = {b.height() for b in self.buttons}
+        self.assertEqual(len(heights), 1, f"boutons de hauteurs différentes : {sorted(heights)}")
+        for b in self.buttons:
+            self.assertEqual(b.text(), b.defaultAction().iconText())
+            self.assertFalse(b.icon().isNull(), b.text())
+            self.assertEqual(b.iconSize().width(), GLYPH_SIZE, b.text())
 
 
 class ErrorReportTests(unittest.TestCase):

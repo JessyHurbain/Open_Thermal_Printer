@@ -68,7 +68,7 @@ Cliquez sur un élément dans l'aperçu ou dans la liste : l'onglet **Élément*
 
 ![Onglet Connexion, exemple avec une PM-241-BT appairée](docs/screenshots/connexion.png)
 
-Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appairés), USB ou port série. **🔍 Détecter l'imprimante** (`Ctrl+D`) cherche et teste toute seule ; *Appairer…* associe une imprimante sans passer par le terminal, *Oublier* la retire de BlueZ. Le voyant en bas à droite indique en permanence si l'imprimante répond. Voir [Connecter l'imprimante](#connecter-limprimante) pour les détails et le dépannage.
+Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appairés), USB ou port série. **Détecter l'imprimante** (`Ctrl+D`) cherche et teste toute seule ; *Appairer…* associe une imprimante sans passer par le terminal, *Oublier* la retire de BlueZ. Le voyant en bas à droite indique en permanence si l'imprimante répond. Voir [Connecter l'imprimante](#connecter-limprimante) pour les détails et le dépannage.
 
 ### 4. Importer un bordereau Vinted / Leboncoin
 
@@ -78,7 +78,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 
 ### 5. Imprimer
 
-`Ctrl+P` (ou **🖨 Imprimer**) envoie l'étiquette affichée. Le **Journal** en bas rend compte du test de liaison et de l'envoi (`✔ Impression envoyée…`), et le voyant de la barre d'état confirme que l'imprimante répond. Les étiquettes se scannent toujours une première fois avant d'être collées : en cas de doute, ajustez *Noirceur* dans l'onglet **Étiquette**.
+`Ctrl+P` (ou **Imprimer**) envoie l'étiquette affichée. Le **Journal** en bas rend compte du test de liaison et de l'envoi (`✔ Impression envoyée…`), et le voyant de la barre d'état confirme que l'imprimante répond. Les étiquettes se scannent toujours une première fois avant d'être collées : en cas de doute, ajustez *Noirceur* dans l'onglet **Étiquette**.
 
 ### Raccourcis
 
@@ -96,7 +96,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 174 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 175 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -142,7 +142,7 @@ Les captures du tutoriel sont produites **par l'application elle-même**, en Qt 
 
 ## Connecter l'imprimante
 
-**Détection automatique.** Onglet **Connexion** → **🔍 Détecter l'imprimante** (ou menu *Imprimante*, Ctrl+D) : l'application cherche les appareils utilisables, retient le plus probable — une Phomemo reconnue à son nom **ou à sa classe Bluetooth** (`Imaging`, icône *printer*), sinon un port USB, puis un port série ou `rfcomm` — remplit la connexion et **teste aussitôt la liaison**. Le nom Bluetooth d'une imprimante ne dit pas toujours ce qu'elle est (`PM-241-BT`) : la classe et l'icône annoncées par l'appareil servent alors d'indice. Si une connexion valide est déjà configurée et que le candidat diffère, l'application **demande avant de la remplacer** (la connexion actuelle est proposée par défaut) ; refuser conserve la configuration en place, et une imprimante déjà constatée injoignable est remplacée sans question. Un appareil Bluetooth appairé qui n'est pas une imprimante (casque, enceinte…) est listé mais jamais retenu : mieux vaut aucun choix qu'un mauvais. Si l'imprimante est allumée mais pas encore appairée, un scan Bluetooth borné (quelques secondes) la signale — et c'est la raison pour laquelle elle **n'apparaît pas dans « Appareils appairés »**, qui ne liste que les appareils déjà appairés. L'application propose alors de l'appairer directement (avec le **Code PIN** mémorisé) ; en cas de refus, *Appairer…* permet de choisir l'appareil et le code à la main. Ce scan joint les appareils à portée à ceux que BlueZ connaît déjà (un appareil connu n'est pas réannoncé), et si la recherche ne donne rien il en explique la raison quand elle est connue : adaptateur éteint, aucun adaptateur, `bluetoothctl` absent.
+**Détection automatique.** Onglet **Connexion** → **Détecter l'imprimante** (ou menu *Imprimante*, Ctrl+D) : l'application cherche les appareils utilisables, retient le plus probable — une Phomemo reconnue à son nom **ou à sa classe Bluetooth** (`Imaging`, icône *printer*), sinon un port USB, puis un port série ou `rfcomm` — remplit la connexion et **teste aussitôt la liaison**. Le nom Bluetooth d'une imprimante ne dit pas toujours ce qu'elle est (`PM-241-BT`) : la classe et l'icône annoncées par l'appareil servent alors d'indice. Si une connexion valide est déjà configurée et que le candidat diffère, l'application **demande avant de la remplacer** (la connexion actuelle est proposée par défaut) ; refuser conserve la configuration en place, et une imprimante déjà constatée injoignable est remplacée sans question. Un appareil Bluetooth appairé qui n'est pas une imprimante (casque, enceinte…) est listé mais jamais retenu : mieux vaut aucun choix qu'un mauvais. Si l'imprimante est allumée mais pas encore appairée, un scan Bluetooth borné (quelques secondes) la signale — et c'est la raison pour laquelle elle **n'apparaît pas dans « Appareils appairés »**, qui ne liste que les appareils déjà appairés. L'application propose alors de l'appairer directement (avec le **Code PIN** mémorisé) ; en cas de refus, *Appairer…* permet de choisir l'appareil et le code à la main. Ce scan joint les appareils à portée à ceux que BlueZ connaît déjà (un appareil connu n'est pas réannoncé), et si la recherche ne donne rien il en explique la raison quand elle est connue : adaptateur éteint, aucun adaptateur, `bluetoothctl` absent.
 
 **Appairage.** Onglet **Connexion** → *Appairer…* : l'application cherche les appareils à portée, met en avant celui qui ressemble à une imprimante, l'appaire puis l'approuve (*trust*) via BlueZ. Le code envoyé est celui du champ **Code PIN** (**0000** par défaut, parfois **1234** ; la dernière valeur est mémorisée) : avec 0000, BlueZ répond seul à l'imprimante ; avec un autre code, l'application le saisit quand l'imprimante le demande. Aucun terminal n'est nécessaire ; si l'appairage est refusé, le message rappelle le code envoyé, et l'appairage manuel ci-dessous reste possible.
 
@@ -182,7 +182,7 @@ sudo usermod -aG lp,dialout $USER    # puis fermer/rouvrir la session
 
 1. Menu **Modèles** (bordereau 100×150, produit 50×30…) ou **Nouveau**, puis onglet **Étiquette** pour régler format, support (gap), noirceur.
 2. Ajoutez des éléments avec les boutons à gauche (📝 Texte, ▥ Code-barres…) ; sélectionnez-les (clic sur l'aperçu ou dans la liste) pour modifier leurs propriétés à droite.
-3. Vérifiez le gap et le format correspondent à vos rouleaux, puis **🖨 Imprimer** (Ctrl+P).
+3. Vérifiez le gap et le format correspondent à vos rouleaux, puis **Imprimer** (Ctrl+P).
 
 ## Structure du projet
 
@@ -204,7 +204,7 @@ labelstudio/
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
   ui/error_report.py        boîte de dialogue des erreurs inattendues
-tests/                      174 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      175 tests : cœur, import, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit

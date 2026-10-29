@@ -3,6 +3,7 @@
 
 import sys
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from labelstudio import diagnostics
@@ -14,6 +15,9 @@ def apply_style(app: QApplication) -> None:
     """Habillage commun à l'application et aux captures du README (outils/captures.py)."""
     app.setApplicationName("Phomemo Label Studio")
     app.setStyle("Fusion")
+    # Les icônes ne servent qu'à la barre d'outils : dans les menus, elles nuiraient à la
+    # lisibilité en n'apparaissant que sur quelques entrées.
+    app.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, True)
     app.setStyleSheet(
         "QToolBar { spacing: 6px; padding: 4px; }"
         "QPushButton { padding: 5px 10px; }"

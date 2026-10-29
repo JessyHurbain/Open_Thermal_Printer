@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from PIL import ImageOps
 
-from PyQt6.QtCore import QRect, QSettings, Qt, QTimer, QUrl
+from PyQt6.QtCore import QRect, QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QAction, QActionGroup, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QImage, QKeySequence,
     QPainter, QPixmap,
@@ -53,12 +53,13 @@ NEW_ELEMENT_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 
-def kind_glyph(kind: str, size: int = 16) -> QIcon:
-    """Glyphe du type dessiné dans un carré de taille fixe.
+def glyph_icon(glyph: str, size: int = 16) -> QIcon:
+    """Glyphe dessiné dans un carré de taille fixe, pour servir d'icône.
 
-    Écrit dans le texte du bouton, un émoji impose sa propre hauteur et se cale mal sur la
-    ligne de base : « Image » sortait 4 px plus haut que les autres. En carré de taille
-    fixe, les cinq lignes ont le même encombrement.
+    Écrit dans le texte d'un bouton, un émoji impose sa propre hauteur et se cale mal sur la
+    ligne de base : « Image » sortait 4 px plus haut que les autres boutons d'ajout, et
+    « Imprimer » 4 px plus haut que les autres de la barre d'outils. En carré de taille fixe,
+    tous les boutons ont le même encombrement.
     """
     pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
@@ -66,7 +67,7 @@ def kind_glyph(kind: str, size: int = 16) -> QIcon:
     font = QFont()
     font.setPixelSize(size - 2)
     painter.setFont(font)
-    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, KIND_ICONS.get(kind, ""))
+    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, glyph)
     painter.end()
     return QIcon(pix)
 
@@ -225,7 +226,7 @@ class MainWindow(QMainWindow):
             glyph = QLabel()
             glyph.setObjectName("kindGlyph")
             glyph.setFixedSize(GLYPH_SIZE, GLYPH_SIZE)
-            glyph.setPixmap(kind_glyph(kind, GLYPH_SIZE).pixmap(GLYPH_SIZE, GLYPH_SIZE))
+            glyph.setPixmap(glyph_icon(KIND_ICONS[kind], GLYPH_SIZE).pixmap(GLYPH_SIZE, GLYPH_SIZE))
             caption = QLabel(KIND_LABELS[kind])
             caption.setObjectName("kindCaption")
             caption.setFixedWidth(text_width)
@@ -250,14 +251,18 @@ class MainWindow(QMainWindow):
         return box
 
     def _build_actions(self) -> None:
-        def act(text, slot, shortcut=None, tip=None, short=None):
-            """Action de menu ; `short` est le libellé compact affiché dans la barre d'outils.
+        def act(text, slot, shortcut=None, tip=None, short=None, icon=None):
+            """Action de menu ; `short` est le libellé compact et `icon` le glyphe de la barre.
 
             Qt sépare les deux : le menu garde la formulation complète, la barre d'outils se
             contente du libellé court, avec une infobulle rappelant le nom et le raccourci.
+            Le glyphe est une icône de 16 px, jamais un émoji dans le texte : sa hauteur
+            imposerait sinon un bouton plus haut que ses voisins.
             """
             a = QAction(text, self)
             a.triggered.connect(slot)
+            if icon:
+                a.setIcon(glyph_icon(icon))
             if short:
                 a.setIconText(short)
             if shortcut:
@@ -267,21 +272,21 @@ class MainWindow(QMainWindow):
             a.setToolTip(hint + (f" ({QKeySequence(shortcut).toString()})" if shortcut else ""))
             return a
 
-        a_new = act("Nouveau", self.new_label, "Ctrl+N", short="📄 Nouveau")
-        a_open = act("Ouvrir…", self.open_file, "Ctrl+O", short="📂 Ouvrir")
-        a_save = act("Enregistrer", self.save_file, "Ctrl+S", short="💾 Enregistrer")
+        a_new = act("Nouveau", self.new_label, "Ctrl+N", short="Nouveau", icon="📄")
+        a_open = act("Ouvrir…", self.open_file, "Ctrl+O", short="Ouvrir", icon="📂")
+        a_save = act("Enregistrer", self.save_file, "Ctrl+S", short="Enregistrer", icon="💾")
         a_saveas = act("Enregistrer sous…", lambda: self.save_file(as_new=True), "Ctrl+Shift+S")
         self.a_undo = act("Annuler", self.undo, "Ctrl+Z", "Revient à l'état précédent")
         self.a_redo = act("Rétablir", self.redo, "Ctrl+Shift+Z", "Refait la modification annulée")
         a_import = act("Importer des étiquettes Vinted / Leboncoin…", lambda: self.import_shipping(), "Ctrl+I",
-                       "Rogner et imprimer un bordereau PDF ou une image", short="📥 Importer")
+                       "Rogner et imprimer un bordereau PDF ou une image", short="Importer", icon="📥")
         a_png = act("Exporter l'aperçu (PNG)…", self.export_png)
         a_cmd = act("Exporter les commandes brutes…", self.export_commands)
         a_quit = act("Quitter", self.close, "Ctrl+Q")
-        self.a_print = act("🖨 Imprimer", self.print_label, "Ctrl+P", short="🖨 Imprimer")
-        self.a_detect = act("🔍 Détecter l'imprimante", self.detect_printer, "Ctrl+D",
+        self.a_print = act("Imprimer", self.print_label, "Ctrl+P", short="Imprimer", icon="🖨")
+        self.a_detect = act("Détecter l'imprimante", self.detect_printer, "Ctrl+D",
                             "Cherche l'imprimante Bluetooth / USB / série et teste la liaison",
-                            short="🔍 Détecter")
+                            short="Détecter", icon="🔍")
         self.a_test = act("Tester la connexion", self.test_connection)
         a_zin = act("Zoom +", lambda: self._set_zoom(self.canvas.px_per_mm * 1.25), "Ctrl++")
         a_zout = act("Zoom −", lambda: self._set_zoom(self.canvas.px_per_mm / 1.25), "Ctrl+-")
@@ -343,7 +348,8 @@ class MainWindow(QMainWindow):
         # menus restent la référence complète (avec raccourcis), pour ne pas tout afficher deux fois.
         tb = QToolBar("Principal")
         tb.setMovable(False)
-        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        tb.setIconSize(QSize(GLYPH_SIZE, GLYPH_SIZE))
         self.addToolBar(tb)
         for a in (a_new, a_open, a_save):
             tb.addAction(a)
