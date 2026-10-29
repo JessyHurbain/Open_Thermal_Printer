@@ -40,6 +40,15 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 .venv/bin/python main.py
 ```
 
+## Tester
+
+```bash
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 91 tests
+./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
+```
+
+Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
+
 ## Imprimer des étiquettes Vinted / Leboncoin
 
 1. Téléchargez vos bordereaux (PDF) depuis Vinted ou Leboncoin.
@@ -110,7 +119,7 @@ labelstudio/
   importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
-tests/                      91 tests : cœur, import, et interface hors écran (python -m unittest discover -s tests)
+tests/                      91 tests : cœur, import, et interface hors écran (./tester.sh)
 ```
 
 ## Dépannage
