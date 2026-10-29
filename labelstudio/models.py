@@ -20,6 +20,15 @@ KIND_LABELS = {
     "rect": "Rectangle",
 }
 
+# Icônes d'interface, réservées à l'écran : les commandes imprimante n'en contiennent jamais
+KIND_ICONS = {
+    "text": "📝",
+    "barcode": "▥",  # barres verticales
+    "qrcode": "▦",  # grille de modules
+    "image": "🖼",
+    "rect": "▭",
+}
+
 # Symbologies proposées : identifiant python-barcode -> libellé affiché
 SYMBOLOGIES = {
     "code128": "Code 128",
@@ -73,6 +82,28 @@ class Element:
     height: float = 10.0  # mm (rectangle uniquement ; l'image garde son ratio)
     thickness: float = 0.4  # mm (rectangle)
     filled: bool = False
+
+    def list_title(self) -> str:
+        """Première ligne de la liste : nom donné, sinon contenu, sinon type."""
+        if self.name:
+            return self.name
+        if self.kind in ("text", "barcode", "qrcode") and self.text:
+            return self.text.replace("\n", " ⏎ ")
+        if self.kind == "image" and self.image_name:
+            return self.image_name
+        return KIND_LABELS.get(self.kind, self.kind)
+
+    def list_detail(self) -> str:
+        """Seconde ligne de la liste : type, puis le réglage propre à ce type."""
+        kind = KIND_LABELS.get(self.kind, self.kind)
+        detail = {
+            "text": f"corps {self.font_size:g} mm",
+            "barcode": SYMBOLOGIES.get(self.symbology, self.symbology),
+            "qrcode": f"correction {self.qr_ecc}",
+            "image": f"largeur {self.width:g} mm",
+            "rect": f"{self.width:g} × {self.height:g} mm",
+        }.get(self.kind, "")
+        return f"{kind} · {detail}" if detail else kind
 
     def display_name(self) -> str:
         label = KIND_LABELS.get(self.kind, self.kind)

@@ -19,10 +19,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
 from PyQt6.QtGui import QMouseEvent  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem  # noqa: E402
 
 from labelstudio import printer, templates  # noqa: E402
-from labelstudio.models import Element, Label, LabelSettings  # noqa: E402
+from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
+from labelstudio.ui.element_list import DETAIL_ROLE, ICON_ROLE, ROW_HEIGHT, ElementItemDelegate  # noqa: E402
 from labelstudio.ui.canvas import (  # noqa: E402
     GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
 )
@@ -394,6 +395,44 @@ class CanvasGuideTests(unittest.TestCase):
                    for x in range(column - 2, column + 3)
                    for y in range(ORIGIN, ORIGIN + 150)}
         self.assertIn(GUIDE_COLOR, colours)  # trait en pointillés : on balaie la colonne
+
+
+class ElementListTests(unittest.TestCase):
+    """Liste à deux lignes : titre, icône de type et détail, tenus à jour."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+
+    def test_items_carry_a_title_an_icon_and_a_detail(self):
+        item = self.win.elements_list.item(0)
+        el = self.win.label.elements[0]
+        self.assertEqual(item.text(), el.list_title())
+        self.assertEqual(item.data(ICON_ROLE), KIND_ICONS[el.kind])
+        self.assertEqual(item.data(DETAIL_ROLE), el.list_detail())
+
+    def test_rows_are_tall_enough_for_two_lines(self):
+        items = self.win.elements_list
+        self.assertIsInstance(items.itemDelegate(), ElementItemDelegate)
+        index = items.model().index(0, 0)
+        self.assertEqual(items.itemDelegate().sizeHint(QStyleOptionViewItem(), index).height(), ROW_HEIGHT)
+
+    def test_renaming_updates_the_first_line(self):
+        self.win._select(0)
+        self.win.element_panel.name.setText("Mon cadre")
+        self.assertEqual(self.win.elements_list.item(0).text(), "Mon cadre")
+        self.assertEqual(self.win.label.elements[0].name, "Mon cadre")
 
 
 class GridMenuTests(unittest.TestCase):

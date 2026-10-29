@@ -46,7 +46,7 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 
 ![Fenêtre principale sur un modèle d'expédition](docs/screenshots/editeur.png)
 
-L'application s'ouvre sur un modèle d'expédition 100 × 150 mm : cadre, expéditeur, destinataire, code-barres et QR code. À gauche, la liste des éléments (les flèches changent l'ordre, la corbeille supprime) et les boutons d'ajout ; au centre, l'aperçu fidèle, où les éléments se déplacent à la souris ; à droite, l'onglet **Étiquette** règle le support (format, gap, résolution, noirceur, vitesse, mode raster ou natif). En bas, **Commandes générées** montre exactement ce qui partira à l'imprimante.
+L'application s'ouvre sur un modèle d'expédition 100 × 150 mm : cadre, expéditeur, destinataire, code-barres et QR code. À gauche, la liste des éléments — deux lignes par élément : son nom et, en gris, son type avec sa caractéristique (taille, symbologie, corps de police), précédés de l'icône du type (les flèches changent l'ordre, la corbeille supprime) et les boutons d'ajout ; au centre, l'aperçu fidèle, où les éléments se déplacent à la souris ; à droite, l'onglet **Étiquette** règle le support (format, gap, résolution, noirceur, vitesse, mode raster ou natif). En bas, **Commandes générées** montre exactement ce qui partira à l'imprimante.
 
 Pour partir d'une page blanche : `Ctrl+N` puis **Format prédéfini** ; pour un autre modèle : menu **Modèles**.
 
@@ -96,7 +96,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 140 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 147 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```

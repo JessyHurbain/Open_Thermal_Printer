@@ -9,14 +9,16 @@ from datetime import datetime
 from PyQt6.QtCore import QSettings, Qt, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar,
+    QVBoxLayout, QWidget,
 )
 
 from .. import __version__, importer, printer, templates
 from ..history import History
+from .element_list import DETAIL_ROLE, ICON_ROLE, ElementItemDelegate
 from ..imaging import encode_image_file
-from ..models import KIND_LABELS, Element, Label
+from ..models import KIND_ICONS, KIND_LABELS, Element, Label
 from ..renderer import render_label, warnings_for
 from ..tspl import build_tspl
 from ..zpl import build_zpl
@@ -75,6 +77,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right)
 
         self.elements_list = QListWidget()
+        self.elements_list.setItemDelegate(ElementItemDelegate(self.elements_list))
+        self.elements_list.setUniformItemSizes(True)
         left = QDockWidget("Éléments", self)
         left.setWidget(self._build_elements_dock())
         left.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
@@ -170,7 +174,7 @@ class MainWindow(QMainWindow):
         box = QWidget()
         lay = QVBoxLayout(box)
         for kind in ("text", "barcode", "qrcode", "image", "rect"):
-            b = QPushButton(f"＋ {KIND_LABELS[kind]}")
+            b = QPushButton(f"{KIND_ICONS[kind]} {KIND_LABELS[kind]}")
             b.clicked.connect(lambda _=False, k=kind: self.add_element(k))
             lay.addWidget(b)
         lay.addWidget(self.elements_list, 1)
@@ -309,9 +313,18 @@ class MainWindow(QMainWindow):
         self.elements_list.blockSignals(True)
         self.elements_list.clear()
         for el in self.label.elements:
-            self.elements_list.addItem(el.display_name())
+            item = QListWidgetItem()
+            self._fill_element_item(item, el)
+            self.elements_list.addItem(item)
         self.elements_list.setCurrentRow(select)
         self.elements_list.blockSignals(False)
+
+    @staticmethod
+    def _fill_element_item(item: QListWidgetItem, el: Element) -> None:
+        """Deux lignes : le titre dans le texte de l'item, icône et détail dans des rôles."""
+        item.setText(el.list_title())
+        item.setData(ICON_ROLE, KIND_ICONS.get(el.kind, ""))
+        item.setData(DETAIL_ROLE, el.list_detail())
 
     def _selected_index(self) -> int:
         return self.canvas.selected if 0 <= self.canvas.selected < len(self.label.elements) else -1
@@ -335,7 +348,7 @@ class MainWindow(QMainWindow):
         self.canvas.refresh()
         row = self._selected_index()
         if row >= 0 and self.elements_list.item(row):
-            self.elements_list.item(row).setText(self.label.elements[row].display_name())
+            self._fill_element_item(self.elements_list.item(row), self.label.elements[row])
         self._set_dirty(True)
         self._code_timer.start()
         self._record()

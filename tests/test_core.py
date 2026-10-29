@@ -16,7 +16,7 @@ from PIL import Image
 from labelstudio import printer, templates
 from labelstudio.history import History
 from labelstudio.imaging import invert_bytes, pack_bitmap, to_bilevel
-from labelstudio.models import Element, Label, LabelSettings
+from labelstudio.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
 from labelstudio.renderer import printer_anchor, render_element, render_label, warnings_for
 from labelstudio.tspl import build_tspl
 from labelstudio.zpl import build_zpl
@@ -74,6 +74,31 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertFalse(history.can_undo)
         self.assertFalse(history.can_redo)
+
+
+class ElementIconTests(unittest.TestCase):
+    def test_every_kind_gets_an_icon_and_a_two_line_label(self):
+        for kind in KIND_ICONS:
+            el = Element(kind=kind)
+            self.assertTrue(KIND_ICONS[kind])
+            self.assertTrue(el.list_title())
+            self.assertTrue(el.list_detail().startswith(KIND_LABELS[kind]))
+
+    def test_title_prefers_the_name_then_the_content(self):
+        self.assertEqual(Element(kind="rect", name="Cadre").list_title(), "Cadre")
+        self.assertEqual(Element(kind="text", text="Bonjour").list_title(), "Bonjour")
+        self.assertEqual(Element(kind="rect").list_title(), "Rectangle")
+
+    def test_detail_recalls_the_setting_of_each_kind(self):
+        self.assertIn("20 × 10 mm", Element(kind="rect").list_detail())
+        self.assertIn("Code 128", Element(kind="barcode").list_detail())
+        self.assertIn("corps", Element(kind="text").list_detail())
+
+    def test_printer_facing_names_never_carry_an_icon(self):
+        # Les commentaires TSPL / ZPL reprennent display_name() : pas d'émoji dans les commandes.
+        for kind in KIND_ICONS:
+            name = Element(kind=kind).display_name()
+            self.assertFalse(any(icon in name for icon in KIND_ICONS.values()))
 
 
 class ImagingTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..imaging import DITHER_MODES, encode_image_file
-from ..models import KIND_LABELS, SYMBOLOGIES, Element
+from ..models import KIND_ICONS, KIND_LABELS, SYMBOLOGIES, Element
 
 
 def _dspin(lo: float, hi: float, step: float, suffix: str = " mm", decimals: int = 1) -> QDoubleSpinBox:
@@ -172,7 +172,7 @@ class ElementPanel(QWidget):
             self.title.setText("Aucun élément sélectionné")
             self._loading = False
             return
-        self.title.setText(KIND_LABELS.get(el.kind, el.kind))
+        self.title.setText(f"{KIND_ICONS.get(el.kind, '')} {KIND_LABELS.get(el.kind, el.kind)}".strip())
         self.name.setText(el.name)
         self.x.setValue(el.x)
         self.y.setValue(el.y)
