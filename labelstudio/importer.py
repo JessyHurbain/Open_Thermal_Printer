@@ -12,6 +12,7 @@ Les rectangles sont des tuples (x0, y0, x1, y1) en pixels de l'image de la page.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from collections import Counter
@@ -107,6 +108,43 @@ class PageSource:
             if text.strip():
                 found.append((text, (int(x0 * k), int(y0 * k), int(x1 * k), int(y1 * k))))
         return found
+
+    def text_rotation(self, page: int = 0, rect: Rect | None = None) -> int:
+        """Rotation horaire (0, 90, 180, 270) qui redresse le contenu du PDF.
+
+        Le rognage ne voit qu'une image : un bordereau dessiné à 90° ou à l'envers (fréquent chez
+        certains transporteurs, Mondial Relay par exemple) se rognait correctement mais s'imprimait
+        couché ou à 180°. La direction d'écriture des lignes de texte donne l'orientation réelle,
+        sans OCR ni reconnaissance de code-barres.
+
+        `rect` restreint la mesure à une zone (repère PREVIEW_DPI) : sur une page A4, les
+        instructions sont droites et masqueraient l'orientation de l'étiquette elle-même.
+        """
+        if not self._doc:
+            return 0
+        try:
+            raw = self._doc[max(0, min(page, self.page_count - 1))].get_text("dict")
+        except Exception:
+            return 0
+        k = PREVIEW_DPI / 72
+        weight: Counter[int] = Counter()  # quarts de tour horaires du contenu, pondérés par le texte
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                chars = len("".join(span.get("text", "") for span in line.get("spans", [])).strip())
+                if not chars:
+                    continue
+                if rect is not None:
+                    x0, y0, x1, y1 = (line.get("bbox") or block.get("bbox") or (0, 0, 0, 0))
+                    cx, cy = (x0 + x1) / 2 * k, (y0 + y1) / 2 * k
+                    if not (rect[0] <= cx <= rect[2] and rect[1] <= cy <= rect[3]):
+                        continue  # texte hors de la zone rognée (mode d'emploi de la page)
+                dx, dy = line.get("dir", (1, 0))
+                quarter = int(round(math.degrees(math.atan2(dy, dx)) / 90)) % 4
+                weight[quarter] += chars
+        if not weight:
+            return 0
+        content = weight.most_common(1)[0][0]  # orientation du contenu : 0 = déjà droit
+        return (4 - content) % 4 * 90  # rotation qui le redresse
 
     def render_region(self, page: int, rect: Rect, dpi: float) -> Image.Image:
         """Région `rect` (repère PREVIEW_DPI) rendue *directement* à `dpi` : net, sans double rééchantillonnage.
@@ -375,7 +413,13 @@ def fit_to_label(crop: Image.Image, label_w_mm: float, label_h_mm: float, margin
 def build_placement(source: PageSource | None, page: int, page_img: Image.Image, rect: Rect, label_w_mm: float,
                     label_h_mm: float, margin_mm: float, auto_rotate: bool, extra_rotation: int, dpi: int,
                     optimize_barcodes: bool, module_cache: dict | None = None, cache_key=None) -> Placement:
-    """Placement final. Pour un PDF, la région est rendue directement à la résolution de l'imprimante."""
+    """Placement final. Pour un PDF, la région est rendue directement à la résolution de l'imprimante.
+
+    Un PDF dont le contenu est dessiné à 90°, 180° ou 270° est redressé d'abord : la rotation
+    demandée par l'utilisateur (↻ 90°) s'ajoute à cette correction.
+    """
+    if source is not None:
+        extra_rotation += source.text_rotation(page, rect)
     crop = page_img.crop(rect)
     module_px = None
     if optimize_barcodes:

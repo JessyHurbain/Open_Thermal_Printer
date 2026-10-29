@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -171,6 +172,66 @@ class SourceTests(unittest.TestCase):
             img = src.render(1, dpi=150)
             self.assertEqual(img.size, (1240, 1755))  # A4 à 150 dpi
             self.assertIsNotNone(importer.content_bbox(img))
+            src.close()
+
+    def test_rotation_is_measured_inside_the_label_only(self):
+        """Le mode d'emploi de la page est droit : il ne doit pas masquer l'étiquette tournée."""
+        try:
+            import pymupdf
+        except ImportError:
+            self.skipTest("PyMuPDF absent")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "r.pdf")
+            doc = pymupdf.open()
+            page = doc.new_page(width=595, height=842)
+            page.insert_text((40, 60), "Mode d'emploi de l'etiquette " * 12, fontsize=11)
+            page.insert_text((420, 760), "LU / R09 24R RECEIVER", fontsize=16, rotate=90)
+            doc.save(path)
+            src = importer.PageSource(path)
+            k = importer.PREVIEW_DPI / 72
+            label_rect = (int(300 * k), int(200 * k), int(595 * k), int(842 * k))
+            self.assertEqual(src.text_rotation(0), 0)  # toute la page : les instructions gagnent
+            self.assertEqual(src.text_rotation(0, label_rect), 90)  # l'étiquette, elle, est couchée
+            doc.close()
+
+    def test_rotation_is_zero_when_the_page_has_no_text(self):
+        try:
+            import pymupdf
+        except ImportError:
+            self.skipTest("PyMuPDF absent")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "vide.pdf")
+            doc = pymupdf.open()
+            doc.new_page(width=595, height=842)
+            doc.save(path)
+            src = importer.PageSource(path)
+            self.assertEqual(src.text_rotation(), 0)
+            doc.close()
+
+    def test_placement_adds_the_orientation_fix(self):
+        """La correction d'orientation s'ajoute à la rotation demandée par l'utilisateur."""
+        try:
+            import pymupdf
+        except ImportError:
+            self.skipTest("PyMuPDF absent")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "e.pdf")
+            doc = pymupdf.open()
+            page = doc.new_page(width=595, height=842)
+            page.insert_text((60, 100), "Bordereau", fontsize=14)
+            doc.save(path)
+            doc.close()
+            src = importer.PageSource(path)
+            page_img = src.render(0, importer.PREVIEW_DPI)
+            rect = importer.auto_crop(page_img, src.text_blocks(0))
+
+            def turns(rotation):
+                with mock.patch.object(importer.PageSource, "text_rotation", return_value=rotation):
+                    place = importer.build_placement(src, 0, page_img, rect, 100, 150, 2.0, False, 0, 203, False)
+                return place.turns
+
+            self.assertEqual((turns(180) - turns(0)) % 4, 2)
+            self.assertEqual((turns(90) - turns(0)) % 4, 1)
             src.close()
 
     def test_rejects_unknown_and_broken_files(self):

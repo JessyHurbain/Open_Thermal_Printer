@@ -40,6 +40,49 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 .venv/bin/python main.py
 ```
 
+## Tutoriel en images
+
+### 1. Composer l'étiquette
+
+![Fenêtre principale sur un modèle d'expédition](docs/screenshots/editeur.png)
+
+L'application s'ouvre sur un modèle d'expédition 100 × 150 mm : cadre, expéditeur, destinataire, code-barres et QR code. À gauche, la liste des éléments (les flèches changent l'ordre, la corbeille supprime) et les boutons d'ajout ; au centre, l'aperçu fidèle, où les éléments se déplacent à la souris ; à droite, l'onglet **Étiquette** règle le support (format, gap, résolution, noirceur, vitesse, mode raster ou natif). En bas, **Commandes générées** montre exactement ce qui partira à l'imprimante.
+
+Pour partir d'une page blanche : `Ctrl+N` puis **Format prédéfini** ; pour un autre modèle : menu **Modèles**.
+
+### 2. Régler un élément
+
+![Réglages du code-barres sélectionné](docs/screenshots/element.png)
+
+Cliquez sur un élément dans l'aperçu ou dans la liste : l'onglet **Élément** affiche ses réglages propres. Ici un code-barres Code 128 : données, symbologie, hauteur des barres, largeur de module et affichage du texte sous le code. Position et rotation se règlent au dixième de millimètre ; au clavier, les flèches déplacent de 0,5 mm (avec **Maj** : 2 mm), `Suppr` retire l'élément.
+
+### 3. Connecter l'imprimante
+
+![Onglet Connexion, exemple avec une PM-241-BT appairée](docs/screenshots/connexion.png)
+
+Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appairés), USB ou port série. **🔍 Détecter l'imprimante** (`Ctrl+D`) cherche et teste toute seule ; *Appairer…* associe une imprimante sans passer par le terminal, *Oublier* la retire de BlueZ. Le voyant en bas à droite indique en permanence si l'imprimante répond. Voir [Connecter l'imprimante](#connecter-limprimante) pour les détails et le dépannage.
+
+### 4. Importer un bordereau Vinted / Leboncoin
+
+![Import d'un bordereau de démonstration, rognage automatique](docs/screenshots/import.png)
+
+`Ctrl+I` (ou glisser un PDF sur la fenêtre) ouvre cette boîte de dialogue : **1.** les documents en file d'attente, **2.** le rognage — automatique ici, avec la mention du bloc retenu — et **3.** la mise en page sur le rouleau. L'aperçu en bas montre le rendu final ; la case au-dessus choisit entre remplacer l'étiquette courante et y ajouter celle-ci, puis *Remplacer* charge le résultat dans l'éditeur et *Importer et imprimer* l'envoie directement. Plusieurs fichiers : le bouton devient **Imprimer les N étiquettes** et les envoie à la suite sur une seule connexion.
+
+### 5. Imprimer
+
+`Ctrl+P` (ou **🖨 Imprimer**) envoie l'étiquette affichée. Le **Journal** en bas rend compte du test de liaison et de l'envoi (`✔ Impression envoyée…`), et le voyant de la barre d'état confirme que l'imprimante répond. Les étiquettes se scannent toujours une première fois avant d'être collées : en cas de doute, ajustez *Noirceur* dans l'onglet **Étiquette**.
+
+### Raccourcis
+
+| Raccourci | Action |
+|---|---|
+| `Ctrl+N` / `Ctrl+O` / `Ctrl+S` | Nouveau / ouvrir un projet `.label.json` / enregistrer |
+| `Ctrl+I` | Importer des étiquettes Vinted / Leboncoin |
+| `Ctrl+P` | Imprimer l'étiquette affichée |
+| `Ctrl+D` | Détecter l'imprimante |
+| `Ctrl+0`, `Ctrl++`, `Ctrl+-` | Ajuster, zoomer, dézoomer (ou `Ctrl` + molette) |
+| `Suppr` | Supprimer l'élément sélectionné |
+
 ## Tester
 
 ```bash
@@ -56,7 +99,9 @@ Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique,
 
 1. Téléchargez vos bordereaux (PDF) depuis Vinted ou Leboncoin.
 2. Dans l'application : **Fichier → Importer des étiquettes Vinted / Leboncoin…** (Ctrl+I), ou **glissez un ou plusieurs PDF sur la fenêtre**. Chaque page de chaque PDF devient une entrée de la file d'attente.
-3. Pour chaque entrée, l'étiquette est repérée automatiquement (cadre bleu). Sinon : cliquez sur un bloc orange, ou tracez un rectangle à la souris ; *Retirer les marges* resserre le cadre ; *↻ 90°* tourne.
+3. Pour chaque entrée, l'étiquette est repérée automatiquement (cadre bleu). Sinon : cliquez sur un bloc orange, ou tracez un rectangle à la souris ; *Retirer les marges* resserre le cadre ; *↻ 90°* tourne d'un quart de tour de plus.
+
+**Orientation.** Le texte de la zone rognée est analysé pour savoir dans quel sens l'étiquette a été dessinée : un bordereau couché ou à l'envers (fréquent chez Mondial Relay) est redressé automatiquement avant la mise à l'échelle, sans intervention. Seul le texte *à l'intérieur* du rognage compte — le mode d'emploi imprimé sur la page A4, lui, est toujours droit et ne fausse pas la mesure. Les images (PNG, JPG) n'ayant pas de texte, elles gardent l'orientation du fichier et se redressent avec *↻ 90°*.
 4. Choisissez le format de votre rouleau (100 × 150 mm par exemple) ; l'aperçu en bas montre exactement ce qui sortira.
 5. **Importer et imprimer** : avec une seule entrée, elle part directement ; avec plusieurs, **« Imprimer les N étiquettes »** les envoie à la suite sur une seule connexion Bluetooth, après confirmation. *Remplacer* / *Ajouter* chargent l'étiquette sélectionnée dans l'éditeur pour la retoucher (ajouter un texte, un n° de commande…).
 
@@ -66,7 +111,7 @@ Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique,
 
 ## Connecter l'imprimante
 
-**Détection automatique.** Onglet **Connexion** → **🔍 Détecter l'imprimante** (ou menu *Imprimante*, Ctrl+D) : l'application cherche les appareils utilisables, retient le plus probable — une Phomemo reconnue à son nom, sinon un port USB, puis un port série ou `rfcomm` — remplit la connexion et **teste aussitôt la liaison**. Si une connexion valide est déjà configurée et que le candidat diffère, l'application **demande avant de la remplacer** (la connexion actuelle est proposée par défaut) ; refuser conserve la configuration en place, et une imprimante déjà constatée injoignable est remplacée sans question. Un appareil Bluetooth appairé qui n'est pas une imprimante (casque, enceinte…) est listé mais jamais retenu : mieux vaut aucun choix qu'un mauvais. Si l'imprimante est allumée mais pas encore appairée, un scan Bluetooth borné (quelques secondes) la signale : appairez-la avec *Appairer…*, puis relancez la détection.
+**Détection automatique.** Onglet **Connexion** → **🔍 Détecter l'imprimante** (ou menu *Imprimante*, Ctrl+D) : l'application cherche les appareils utilisables, retient le plus probable — une Phomemo reconnue à son nom **ou à sa classe Bluetooth** (`Imaging`, icône *printer*), sinon un port USB, puis un port série ou `rfcomm` — remplit la connexion et **teste aussitôt la liaison**. Le nom Bluetooth d'une imprimante ne dit pas toujours ce qu'elle est (`PM-241-BT`) : la classe et l'icône annoncées par l'appareil servent alors d'indice. Si une connexion valide est déjà configurée et que le candidat diffère, l'application **demande avant de la remplacer** (la connexion actuelle est proposée par défaut) ; refuser conserve la configuration en place, et une imprimante déjà constatée injoignable est remplacée sans question. Un appareil Bluetooth appairé qui n'est pas une imprimante (casque, enceinte…) est listé mais jamais retenu : mieux vaut aucun choix qu'un mauvais. Si l'imprimante est allumée mais pas encore appairée, un scan Bluetooth borné (quelques secondes) la signale — et c'est la raison pour laquelle elle **n'apparaît pas dans « Appareils appairés »**, qui ne liste que les appareils déjà appairés. L'application propose alors de l'appairer directement (avec le **Code PIN** mémorisé) ; en cas de refus, *Appairer…* permet de choisir l'appareil et le code à la main. Ce scan joint les appareils à portée à ceux que BlueZ connaît déjà (un appareil connu n'est pas réannoncé), et si la recherche ne donne rien il en explique la raison quand elle est connue : adaptateur éteint, aucun adaptateur, `bluetoothctl` absent.
 
 **Appairage.** Onglet **Connexion** → *Appairer…* : l'application cherche les appareils à portée, met en avant celui qui ressemble à une imprimante, l'appaire puis l'approuve (*trust*) via BlueZ. Le code envoyé est celui du champ **Code PIN** (**0000** par défaut, parfois **1234** ; la dernière valeur est mémorisée) : avec 0000, BlueZ répond seul à l'imprimante ; avec un autre code, l'application le saisit quand l'imprimante le demande. Aucun terminal n'est nécessaire ; si l'appairage est refusé, le message rappelle le code envoyé, et l'appairage manuel ci-dessous reste possible.
 
