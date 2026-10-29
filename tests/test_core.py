@@ -456,6 +456,16 @@ class DetectTests(unittest.TestCase):
 
 
 class BluetoothConnectTests(unittest.TestCase):
+    """Reconnexion après un lien resté occupé (EBUSY), indépendante du support Bluetooth du Python."""
+
+    def setUp(self):
+        # Un build CPython générique n'a pas AF_BLUETOOTH : on fournit les valeurs pour que la
+        # logique de reconnexion soit testable partout, y compris en intégration continue.
+        for name, value in (("AF_BLUETOOTH", 31), ("BTPROTO_RFCOMM", 3)):
+            patch = mock.patch.object(printer, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     @staticmethod
     def _socket(attempts, failure):
         class FakeSock:
@@ -481,6 +491,12 @@ class BluetoothConnectTests(unittest.TestCase):
             conn.open()
             conn.close()
         self.assertEqual(len(attempts), 2)
+
+    def test_a_python_without_bluetooth_is_explained(self):
+        with mock.patch.object(printer, "AF_BLUETOOTH", None):
+            with self.assertRaises(printer.PrinterError) as caught:
+                printer.BluetoothConnection("AA:BB:CC:DD:EE:FF").open()
+        self.assertIn("sans support Bluetooth", str(caught.exception))
 
     def test_persistent_busy_is_explained(self):
         attempts: list[int] = []

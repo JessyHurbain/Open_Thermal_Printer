@@ -28,6 +28,11 @@ CHUNK_SIZE = 512  # octets par écriture : évite de saturer le tampon de l'impr
 CHUNK_DELAY = 0.004  # pause entre deux paquets (s)
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
+# Résolues une fois : les builds CPython génériques (pyenv, wheels de CI) n'ont pas le
+# Bluetooth, et cette indirection permet de tester la reconnexion sur n'importe quel Python.
+AF_BLUETOOTH = getattr(socket, "AF_BLUETOOTH", None)
+BTPROTO_RFCOMM = getattr(socket, "BTPROTO_RFCOMM", None)
+
 ProgressCb = Callable[[int], None]  # reçoit un pourcentage 0..100
 
 
@@ -85,7 +90,7 @@ class BluetoothConnection(Connection):
         self.sock: socket.socket | None = None
 
     def open(self) -> None:
-        if not hasattr(socket, "AF_BLUETOOTH"):
+        if AF_BLUETOOTH is None or BTPROTO_RFCOMM is None:
             raise PrinterError(
                 "Ce Python a été compilé sans support Bluetooth.\n"
                 "Utilisez le Python du système (/usr/bin/python3) et installez : sudo apt install bluez libbluetooth-dev"
@@ -93,7 +98,7 @@ class BluetoothConnection(Connection):
         # Deux essais : juste après un envoi, BlueZ peut garder le lien quelques instants et
         # refuser la reconnexion (EBUSY) alors que rien d'autre n'utilise l'imprimante.
         for attempt in (0, 1):
-            sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
             sock.settimeout(self.timeout)
             try:
                 sock.connect((self.mac, self.channel))

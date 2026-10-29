@@ -96,10 +96,12 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 173 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 174 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
+
+La même suite tourne à chaque `push` et à chaque pull request via GitHub Actions ([tests.yml](.github/workflows/tests.yml)), sur Python 3.10 et 3.12, sans écran. Le hook local reste utile pour un retour immédiat ; l'intégration continue rattrape les commits faits avec `--no-verify` ou depuis une autre machine.
 
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 
@@ -190,10 +192,11 @@ labelstudio/
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
   ui/error_report.py        boîte de dialogue des erreurs inattendues
-tests/                      173 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      174 tests : cœur, import, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
+.github/workflows/tests.yml intégration continue : même suite à chaque push
 ```
 
 ## Dépannage
