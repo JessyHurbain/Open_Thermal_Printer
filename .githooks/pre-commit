@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Hook pre-commit : refuse un commit si la suite de tests échoue.
+# Actif après : git config core.hooksPath .githooks   (déjà configuré dans ce dépôt)
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! output=$(./tester.sh 2>&1); then
+    printf '%s\n' "$output"
+    echo ""
+    echo "✘ Tests en échec : commit annulé (git commit --no-verify pour forcer)."
+    exit 1
+fi
+
+echo "✔ Tests OK — $(printf '%s\n' "$output" | grep -E '^Ran ' | tail -n 1)"

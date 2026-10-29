@@ -49,6 +49,8 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 
+**Avant chaque commit.** Le hook versionné `.githooks/pre-commit` lance `./tester.sh` et **refuse le commit** si un test échoue, en affichant la sortie complète ; `git commit --no-verify` permet de passer outre. Il s'active par `git config core.hooksPath .githooks`, déjà fait dans ce dépôt — à relancer après un nouveau clone.
+
 ## Imprimer des étiquettes Vinted / Leboncoin
 
 1. Téléchargez vos bordereaux (PDF) depuis Vinted ou Leboncoin.
@@ -120,6 +122,7 @@ labelstudio/
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
 tests/                      91 tests : cœur, import, et interface hors écran (./tester.sh)
+.githooks/pre-commit        hook Git : lance les tests avant chaque commit
 ```
 
 ## Dépannage
