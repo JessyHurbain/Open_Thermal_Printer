@@ -1,0 +1,16 @@
+# Environnement virtuel (créé par lancer.sh)
+.venv/
+venv/
+env/
+
+# Caches Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Fichiers générés par l'application
+*.label.json
+*.tspl
+*.zpl
