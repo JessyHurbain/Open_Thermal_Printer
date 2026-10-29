@@ -584,6 +584,9 @@ class MainWindow(QMainWindow):
                 self.conn_panel.set_status("Détection ignorée : la connexion actuelle est conservée.")
                 return
             self.conn_panel.apply_detection(detection)
+            pending = [d for d in detection.devices if d.pending]
+            if detection.chosen is None and pending:
+                self._offer_pairing(pending[0])
 
         self._run(lambda progress, message: printer.detect_printer(progress, message, lang),
                   "Recherche de l'imprimante…", ok,
@@ -593,6 +596,35 @@ class MainWindow(QMainWindow):
     def _connection_key(cfg: dict) -> tuple[str, str]:
         """Identité d'une connexion : mode + adresse MAC ou chemin du port."""
         return (cfg.get("type") or "", (cfg.get("mac") or cfg.get("path") or "").strip().upper())
+
+    def _offer_pairing(self, device: printer.Device) -> None:
+        """Propose d'appairer une imprimante repérée mais encore absente des appareils appairés."""
+        answer = QMessageBox.question(
+            self, "Appairer l'imprimante ?",
+            f"{device.label}\n\n"
+            "Elle est à portée mais pas encore appairée : c'est pour cela qu'elle n'apparaît pas "
+            "dans la liste des appareils appairés. L'appairer maintenant ?\n\n"
+            "Si besoin, mettez-la en mode appairage (bouton maintenu à l'allumage) et choisissez "
+            "le code PIN dans la fenêtre d'appairage.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        mac, name = device.config.get("mac", ""), device.name
+        pin = str(QSettings("PhomemoLabelStudio", "LabelStudio").value("pair/pin", "0000"))
+
+        def ok(result: printer.PairResult) -> None:
+            self.log(("✔ " if result.ok else "✘ ") + result.message)
+            self.conn_panel.set_status(result.message, ok=result.ok)
+            if not result.ok:
+                return
+            self.conn_panel.use_bluetooth(mac)
+            self.test_connection()
+
+        self._run(lambda _p: printer.pair_bluetooth(mac, name, pin=pin),
+                  f"Appairage de {name or mac}…", ok,
+                  failure_title="Appairage Bluetooth", inspect_commands=False)
 
     @staticmethod
     def _describe_connection(cfg: dict) -> str:

@@ -108,18 +108,18 @@ class PairingDialog(QDialog):
         self._set_status("Recherche des appareils Bluetooth à portée… (quelques secondes)")
         self._start(lambda progress, message: printer.discover_bluetooth_devices(), self._show_devices)
 
-    def _show_devices(self, devices: list[tuple[str, str]]) -> None:
+    def _show_devices(self, devices: list[printer.Nearby]) -> None:
         paired = {mac for mac, _name in printer.list_paired_devices()}
         self.list.clear()
         probable: QListWidgetItem | None = None
-        for mac, name in devices:
-            text = f"{name or 'appareil sans nom'}  ({mac})"
-            if mac in paired:
+        for device in devices:
+            text = f"{device.name or 'appareil sans nom'}  ({device.mac})"
+            if device.mac in paired:
                 text += "  — déjà appairé"
             item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, mac)
-            item.setData(Qt.ItemDataRole.UserRole + 1, name)
-            if printer.looks_like_printer(name):
+            item.setData(Qt.ItemDataRole.UserRole, device.mac)
+            item.setData(Qt.ItemDataRole.UserRole + 1, device.name)
+            if device.printer or printer.looks_like_printer(device.name):
                 item.setText(text + "  — imprimante probable")
                 font = QFont(item.font())
                 font.setBold(True)
@@ -127,8 +127,10 @@ class PairingDialog(QDialog):
                 probable = probable or item
             self.list.addItem(item)
         if not devices:
+            problem = printer.bluetooth_problem()
             self._set_status("Aucun appareil trouvé : vérifiez que l'imprimante est allumée, en mode "
-                             "appairage et à portée, puis relancez la recherche.", "#d93025")
+                             "appairage et à portée, puis relancez la recherche."
+                             + (f" {problem}" if problem else ""), "#d93025")
             return
         self.list.setCurrentItem(probable or self.list.item(0))
         self._set_status(f"{len(devices)} appareil(s) trouvé(s). Choisissez l'imprimante, puis « Appairer ».")

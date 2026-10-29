@@ -82,14 +82,21 @@ class BluetoothConnection(Connection):
                 "Ce Python a été compilé sans support Bluetooth.\n"
                 "Utilisez le Python du système (/usr/bin/python3) et installez : sudo apt install bluez libbluetooth-dev"
             )
-        sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        sock.settimeout(self.timeout)
-        try:
-            sock.connect((self.mac, self.channel))
-        except OSError as exc:
-            sock.close()
-            raise PrinterError(self._explain(exc)) from exc
-        self.sock = sock
+        # Deux essais : juste après un envoi, BlueZ peut garder le lien quelques instants et
+        # refuser la reconnexion (EBUSY) alors que rien d'autre n'utilise l'imprimante.
+        for attempt in (0, 1):
+            sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect((self.mac, self.channel))
+            except OSError as exc:
+                sock.close()
+                if attempt == 0 and exc.errno in (errno.EBUSY, errno.EADDRINUSE, errno.EAGAIN):
+                    time.sleep(0.6)
+                    continue
+                raise PrinterError(self._explain(exc)) from exc
+            self.sock = sock
+            return
 
     def _explain(self, exc: OSError) -> str:
         hints = {
@@ -229,14 +236,92 @@ PHOMEMO_HINTS = ("PHOMEMO", "PM-241", "PM241", "PM-2", "PM2")
 PRINTER_HINTS = ("PRINTER", "IMPRIMANTE", "THERMAL", "LABEL", "ETIQUET", "ZEBRA", "BROTHER", "TSC", "GODEX")
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(output: str) -> str:
+    """Sortie de bluetoothctl sans ses séquences de couleur.
+
+    bluetoothctl colore ses lignes (« [ESC[0;92mNEWESC[0m] Device … » quand la sortie n'est pas
+    un terminal) : sans ce nettoyage aucune ligne de scan n'est reconnue et l'imprimante semble
+    absente alors qu'elle est bien annoncée.
+    """
+    return _ANSI_RE.sub("", output)
+
+
 def _parse_devices(output: str) -> list[tuple[str, str]]:
     """Lignes « Device AA:BB:CC:DD:EE:FF Nom » de bluetoothctl -> liste de (MAC, nom).
 
-    Un scan actif préfixe les lignes par « [NEW] » ou « [CHG] » : on les accepte aussi.
+    Un scan actif préfixe les lignes par « [NEW] » ou « [CHG] », avec ou sans couleurs : on les
+    accepte aussi.
     """
     found = re.findall(r"^\s*(?:\[[A-Z]+\]\s*)?Device\s+((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})\s+(.*)$",
-                       output, re.M)
+                       _plain(output), re.M)
     return [(mac.upper(), name.strip()) for mac, name in found]
+
+
+@dataclass(frozen=True)
+class Nearby:
+    """Appareil Bluetooth repéré à portée."""
+
+    mac: str
+    name: str
+    printer: bool = False  # la classe ou l'icône annoncée par l'appareil dit « imprimante »
+
+
+_PROPERTY_RE = re.compile(r"^(Class|Icon|UUID|RSSI|TxPower|AddressType|ManufacturerData|ServiceData|Name|Alias):")
+
+
+def _announced_printers(output: str) -> set[str]:
+    """MAC des appareils dont BlueZ annonce l'icône « printer » ou la classe « imprimante ».
+
+    Une Phomemo ne porte pas forcément son nom dans son nom Bluetooth (« PM-241-BT ») :
+    la classe principale 0x06 (Imaging) et l'icône sont des indices bien plus fiables.
+    Les deux formes de sortie sont acceptées : propriété sur la ligne du scan
+    (« Device MAC Icon: printer ») ou sur sa propre ligne (« info » : un en-tête puis des
+    propriétés indentées).
+    """
+    macs: set[str] = set()
+    current = ""
+    for line in _plain(output).splitlines():
+        header = re.search(r"Device\s+((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})", line)
+        if header:
+            current = header.group(1).upper()
+        prop = re.search(r"\b(Icon|Class):\s*(\S+)", line)
+        if not prop or not current:
+            continue
+        kind, value = prop.group(1), prop.group(2)
+        if kind == "Icon" and value.lower() == "printer":
+            macs.add(current)
+        elif kind == "Class":
+            try:
+                major = (int(value, 16) >> 8) & 0x1F  # classe principale (bits 8 à 12)
+            except ValueError:
+                continue
+            if major == 0x06:  # Imaging : imprimante, scanner…
+                macs.add(current)
+    return macs
+
+
+def _parse_nearby(output: str) -> list[Nearby]:
+    """Appareils repérés (ordre d'apparition), avec le nom et l'indice « imprimante ».
+
+    Un appareil produit plusieurs lignes (« Class: », « Icon: », « RSSI: »…) : seule la première
+    ligne qui porte un vrai nom compte, les lignes de propriétés ne deviennent jamais un nom.
+    """
+    printers = _announced_printers(output)
+    order: list[str] = []
+    names: dict[str, str] = {}
+    for mac, name in _parse_devices(output):
+        if name.startswith(("Name:", "Alias:")):
+            name = name.split(":", 1)[1].strip()
+        elif _PROPERTY_RE.match(name):
+            name = ""  # ligne de propriété, pas un nom
+        if mac not in order:
+            order.append(mac)
+        if name and not names.get(mac):
+            names[mac] = name
+    return [Nearby(mac, names.get(mac, ""), mac in printers) for mac in order]
 
 
 def list_paired_devices() -> list[tuple[str, str]]:
@@ -252,19 +337,59 @@ def list_paired_devices() -> list[tuple[str, str]]:
     return []
 
 
-def discover_bluetooth_devices(timeout: float = 6.0) -> list[tuple[str, str]]:
+def discover_bluetooth_devices(timeout: float = 6.0) -> list[Nearby]:
     """Scan Bluetooth actif borné dans le temps : appareils à portée, appairés ou non.
 
-    Vide si BlueZ est absent ou refuse le scan (permissions) : la détection continue avec le reste.
+    La sortie du scan est complétée par les appareils déjà connus de BlueZ : un appareil connu
+    n'est pas réannoncé pendant un scan, et il reste pourtant utilisable (donc à afficher).
+    Vide si BlueZ est absent ou refuse le scan : la détection continue avec le reste.
     """
+    chunks: list[str] = []
     try:
-        out = subprocess.run(
+        scan = subprocess.run(
             ["bluetoothctl", "--timeout", str(max(1, int(timeout))), "scan", "on"],
             capture_output=True, text=True, timeout=timeout + 8, check=False,
-        ).stdout
+        )
+        chunks += [scan.stdout, scan.stderr]
+        known = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True,
+                               timeout=5, check=False)
+        chunks.append(known.stdout)
     except (OSError, subprocess.SubprocessError):
         return []
-    return _parse_devices(out)
+    nearby = _parse_nearby("".join(chunks))
+    # Un appareil déjà connu n'est plus décrit pendant un scan : sa classe est alors relue
+    # une fois, pour savoir s'il s'agit d'une imprimante sans se fier à son seul nom.
+    unknown = [device.mac for device in nearby if not device.printer]
+    if unknown:
+        details = "".join(_device_info(mac) for mac in unknown)
+        printers = _announced_printers(details)
+        nearby = [Nearby(d.mac, d.name, d.printer or d.mac in printers) for d in nearby]
+    return nearby
+
+
+def _device_info(mac: str) -> str:
+    """Sortie de `bluetoothctl info MAC` (classe, icône, nom) ; vide si indisponible."""
+    try:
+        return subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True,
+                              timeout=5, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def bluetooth_problem() -> str:
+    """Raison lisible pour laquelle un scan ne peut rien trouver (vide si tout semble normal)."""
+    try:
+        show = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True,
+                              timeout=5, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return "bluetoothctl est introuvable : installez le paquet bluez."
+    show = _plain(show)
+    if not show.strip() or "no default controller" in show.lower():
+        return "Aucun adaptateur Bluetooth actif sur cette machine."
+    if re.search(r"^\s*Powered:\s*no", show, re.M):
+        return "L'adaptateur Bluetooth est éteint : activez-le (menu Bluetooth de Linux Mint), " \
+               "puis relancez la recherche."
+    return ""
 
 
 def list_serial_ports() -> list[str]:
@@ -309,33 +434,45 @@ class Device:
     label: str  # description affichée
     config: dict  # config prête pour make_connection()
     score: int  # plus haut = plus probable ; 0 = repéré mais inutilisable (non appairé)
+    name: str = ""  # nom Bluetooth de l'appareil
+    pending: bool = False  # repéré à portée mais pas appairé : à appairer avant utilisation
 
     @property
     def usable(self) -> bool:
         return self.score > 0
 
 
+def _paired_printer_hints(paired: list[tuple[str, str]]) -> set[str]:
+    """MAC des appareils appairés dont la classe/icône Bluetooth dit « imprimante »."""
+    return _announced_printers("".join(_device_info(mac) for mac, _name in paired))
+
+
 def build_devices(paired: list[tuple[str, str]], usb_paths: list[str], serial_paths: list[str],
-                  discovered: list[tuple[str, str]] | None = None) -> list[Device]:
+                  discovered: list[Nearby] | None = None, printer_macs: set[str] | None = None) -> list[Device]:
     """Imprimantes candidates, les plus probables d'abord.
 
     Une Phomemo appairée passe devant les autres appareils Bluetooth, un port USB devant la série
     (plus fiable, pas d'appairage). Un appareil appairé dont le nom n'évoque pas une imprimante
     (casque, enceinte…) est signalé mais jamais retenu : il reste choisissable à la main.
     `discovered` : appareils à portée mais non appairés, à appairer avant utilisation.
+    `printer_macs` : adresses dont la classe Bluetooth annonce une imprimante, quand le nom
+    n'en dit rien (« PM-241-BT » par exemple).
     """
     devices: list[Device] = []
+    printer_macs = printer_macs or set()
     for mac, name in paired:
         config = {"type": "bluetooth", "mac": mac, "channel": 1}
         if _has_hint(f"{name} {mac}", PHOMEMO_HINTS):
             score = 90
         elif looks_like_printer(name):
             score = 80
+        elif mac in printer_macs:
+            score = 85  # classe/icône « imprimante » : plus sûr qu'un nom absent
         else:
             score = 0
         label = f"Bluetooth {name or mac} ({mac})"
         devices.append(Device("bluetooth", label if score else f"{label} — appairé, pas une imprimante identifiée",
-                              config, score))
+                              config, score, name))
     for path in usb_paths:
         description = _usb_description(path)
         score = 95 if _has_hint(description, PHOMEMO_HINTS) else 70
@@ -346,11 +483,13 @@ def build_devices(paired: list[tuple[str, str]], usb_paths: list[str], serial_pa
         devices.append(Device("serial", f"Port série {path}",
                               {"type": "serial", "path": path, "baudrate": 115200}, 60 if rfcomm else 50))
     known = {d.config.get("mac") for d in devices if d.kind == "bluetooth"}
-    for mac, name in discovered or []:
-        if mac in known:
+    for nearby in discovered or []:
+        if nearby.mac in known:
             continue
-        devices.append(Device("bluetooth", f"Bluetooth {name or mac} ({mac}) — non appairé",
-                              {"type": "bluetooth", "mac": mac, "channel": 1}, 0))
+        suffix = " — non appairé, imprimante probable" if nearby.printer else " — non appairé"
+        devices.append(Device("bluetooth", f"Bluetooth {nearby.name or nearby.mac} ({nearby.mac}){suffix}",
+                              {"type": "bluetooth", "mac": nearby.mac, "channel": 1}, 0,
+                              nearby.name, pending=True))
     devices.sort(key=lambda d: (-d.score, d.label))
     return devices
 
@@ -361,9 +500,10 @@ def scan_devices(discover: bool = True) -> list[Device]:
     Si rien d'utilisable n'est trouvé, un scan Bluetooth à portée signale l'imprimante à appairer.
     """
     paired, usb, serial = list_paired_devices(), list_usb_devices(), list_serial_ports()
-    devices = build_devices(paired, usb, serial)
+    hints = _paired_printer_hints(paired)
+    devices = build_devices(paired, usb, serial, printer_macs=hints)
     if discover and not any(d.usable for d in devices):
-        devices = build_devices(paired, usb, serial, discover_bluetooth_devices())
+        devices = build_devices(paired, usb, serial, discover_bluetooth_devices(), hints)
     return devices
 
 
@@ -474,6 +614,10 @@ class Detection:
             return ("Aucune imprimante détectée : allumez-la, appairez-la en Bluetooth "
                     "ou branchez-la en USB, puis relancez la détection.")
         if self.chosen is None:
+            pending = [d.label for d in self.devices if "imprimante probable" in d.label]
+            if pending:
+                return (f"Imprimante détectée mais pas encore appairée : {'; '.join(pending)}. "
+                        "Appairez-la avec le bouton « Appairer… », puis relancez la détection.")
             names = ", ".join(d.label for d in self.devices)
             if all("non appairé" in d.label for d in self.devices):
                 return (f"Aucune imprimante appairée. À portée : {names}. "
@@ -601,6 +745,24 @@ def _pair_with_pin(mac: str, pin: str, timeout: float) -> str:
     return "".join(output)
 
 
+def _ensure_known(mac: str, timeout: float) -> None:
+    """Fait réapparaître l'appareil dans BlueZ s'il en a disparu.
+
+    BlueZ retire les appareils non appairés quand le scan se termine : un appareil choisi dans la
+    liste quelques secondes plus tôt répond alors « not available » à l'appairage. Un court scan
+    avant `pair` suffit à le réinscrire.
+    """
+    try:
+        known = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True,
+                               timeout=5, check=False).stdout
+        if any(found == mac for found, _name in _parse_devices(known)):
+            return
+        subprocess.run(["bluetoothctl", "--timeout", "4", "scan", "on"], capture_output=True,
+                       text=True, timeout=min(timeout, 12), check=False)
+    except (OSError, subprocess.SubprocessError):
+        return
+
+
 def pair_bluetooth(mac: str, name: str = "", timeout: float = 30.0, pin: str = "0000") -> PairResult:
     """Appaire puis approuve (`trust`) une imprimante Bluetooth, sans passer par le terminal.
 
@@ -616,6 +778,7 @@ def pair_bluetooth(mac: str, name: str = "", timeout: float = 30.0, pin: str = "
     if not pin.isdigit() or not 4 <= len(pin) <= 6:
         return PairResult(False, "Code PIN invalide : 4 à 6 chiffres (0000 par défaut).")
     label = name or mac
+    _ensure_known(mac, timeout)
     try:
         if pin == "0000":
             paired = _bluetoothctl(["pair", mac], timeout)

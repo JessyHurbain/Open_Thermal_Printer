@@ -59,7 +59,8 @@ class ConnectionPanel(QWidget):
         self.channel.setRange(1, 30)
         self.channel.setValue(1)
         f.addRow("Canal RFCOMM", self.channel)
-        hint = QLabel("L'imprimante doit d'abord être appairée dans les paramètres Bluetooth de Linux Mint.")
+        hint = QLabel("L'imprimante doit d'abord être appairée : utilisez « Appairer… » ci-dessus, "
+                      "sans quitter l'application.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: gray;")
         f.addRow(hint)
