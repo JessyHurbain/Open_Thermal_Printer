@@ -110,7 +110,7 @@ labelstudio/
   importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
-tests/                      51 tests unitaires (python -m unittest discover -s tests)
+tests/                      91 tests : cœur, import, et interface hors écran (python -m unittest discover -s tests)
 ```
 
 ## Dépannage
