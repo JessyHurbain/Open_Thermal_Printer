@@ -1,9 +1,12 @@
 """Tests du cœur (sans interface) : `python -m unittest discover -s tests -v`"""
 
 import os
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -202,6 +205,11 @@ class PrinterTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_probe_timeout_is_short_for_bluetooth(self):
+        conn = printer.make_connection({"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF"}, timeout=3)
+        self.assertEqual(conn.timeout, 3)
+        self.assertEqual(printer.make_connection({"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF"}).timeout, 10.0)
+
     def test_missing_device_message(self):
         res = printer.test_connection({"type": "usb", "path": "/dev/usb/lp_inexistant"})
         self.assertFalse(res.ok)
@@ -210,6 +218,135 @@ class PrinterTests(unittest.TestCase):
     def test_unknown_type(self):
         with self.assertRaises(printer.PrinterError):
             printer.make_connection({"type": "wifi"})
+
+
+class DetectTests(unittest.TestCase):
+    def test_phomemo_paired_device_comes_first(self):
+        devices = printer.build_devices(
+            [("11:22:33:44:55:66", "Souris"), ("AA:BB:CC:DD:EE:FF", "PM-241-BT")], [], [])
+        self.assertEqual(devices[0].kind, "bluetooth")
+        self.assertEqual(devices[0].config["mac"], "AA:BB:CC:DD:EE:FF")
+        self.assertTrue(devices[0].usable)
+        self.assertEqual(devices[-1].config["mac"], "11:22:33:44:55:66")
+
+    def test_usb_comes_before_serial_and_rfcomm_comes_first(self):
+        devices = printer.build_devices([], ["/dev/usb/lp0"], ["/dev/ttyUSB0", "/dev/rfcomm0"])
+        self.assertEqual([d.kind for d in devices], ["usb", "serial", "serial"])
+        self.assertEqual(devices[1].config["path"], "/dev/rfcomm0")  # pont Bluetooth déjà ouvert
+        self.assertEqual(devices[2].config["path"], "/dev/ttyUSB0")
+
+    def test_generic_paired_device_is_not_taken_for_a_printer(self):
+        devices = printer.build_devices([("94:DB:56:AA:87:92", "WH-CH700N")], [], [])
+        self.assertFalse(devices[0].usable)
+        self.assertIn("pas une imprimante", devices[0].label)
+        self.assertIn("Aucune imprimante reconnue", printer.Detection(devices).summary())
+
+    def test_generic_printer_name_is_accepted(self):
+        devices = printer.build_devices([("AA:BB:CC:DD:EE:FF", "Thermal Printer 58")], [], [])
+        self.assertTrue(devices[0].usable)
+        self.assertNotIn("pas une imprimante", devices[0].label)
+
+    def test_discovered_but_unpaired_device_is_reported_not_chosen(self):
+        devices = printer.build_devices([], [], [], [("AA:BB:CC:DD:EE:FF", "PM-241-BT")])
+        self.assertEqual(len(devices), 1)
+        self.assertFalse(devices[0].usable)
+        self.assertIn("non appairé", devices[0].label)
+        self.assertIn("Appairez-la", printer.Detection(devices).summary())
+
+    def test_bluetoothctl_output_is_parsed(self):
+        out = "[NEW] Device AA:BB:CC:DD:EE:FF PM-241-BT\nDevice 11:22:33:44:55:66 Souris\n"
+        self.assertEqual(printer._parse_devices(out),
+                         [("AA:BB:CC:DD:EE:FF", "PM-241-BT"), ("11:22:33:44:55:66", "Souris")])
+
+    def test_scan_only_discovers_when_nothing_usable_is_known(self):
+        with mock.patch.object(printer, "list_paired_devices", return_value=[]), \
+             mock.patch.object(printer, "list_usb_devices", return_value=[]), \
+             mock.patch.object(printer, "list_serial_ports", return_value=[]), \
+             mock.patch.object(printer, "discover_bluetooth_devices",
+                               return_value=[("AA:BB:CC:DD:EE:FF", "PM-241-BT")]) as scan:
+            devices = printer.scan_devices()
+        scan.assert_called_once()
+        self.assertEqual(devices[0].config["mac"], "AA:BB:CC:DD:EE:FF")
+        self.assertFalse(devices[0].usable)  # à appairer d'abord
+
+        with mock.patch.object(printer, "list_paired_devices", return_value=[]), \
+             mock.patch.object(printer, "list_usb_devices", return_value=["/dev/usb/lp0"]), \
+             mock.patch.object(printer, "list_serial_ports", return_value=[]), \
+             mock.patch.object(printer, "discover_bluetooth_devices") as scan:
+            printer.scan_devices()
+        scan.assert_not_called()  # une imprimante USB suffit : pas de scan Bluetooth
+
+    def test_detection_without_printer_says_so(self):
+        with mock.patch.object(printer, "scan_devices", return_value=[]):
+            detection = printer.detect_printer(discover=False)
+        self.assertIsNone(detection.chosen)
+        self.assertIsNone(detection.result)
+        self.assertIn("Aucune imprimante détectée", detection.summary())
+
+    def test_detection_probes_the_best_device(self):
+        device = printer.Device("usb", "USB /dev/usb/lp0", {"type": "usb", "path": "/dev/usb/lp0"}, 70)
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie.\nModèle : PM-241"))
+        with mock.patch.object(printer, "scan_devices", return_value=[device]), probe as called:
+            detection = printer.detect_printer(discover=False)
+        called.assert_called_once_with({"type": "usb", "path": "/dev/usb/lp0"}, "tspl")
+        self.assertIs(detection.chosen, device)
+        self.assertIn("Imprimante prête", detection.summary())
+
+
+class PairTests(unittest.TestCase):
+    @staticmethod
+    def _done(stdout: str = "", stderr: str = "", code: int = 0):
+        return types.SimpleNamespace(stdout=stdout, stderr=stderr, returncode=code)
+
+    def test_pair_then_trust_succeeds(self):
+        outputs = [self._done("Pairing successful\n"), self._done("trust succeeded\n")]
+        with mock.patch.object(printer.subprocess, "run", side_effect=outputs) as run:
+            result = printer.pair_bluetooth("aa:bb:cc:dd:ee:ff", "PM-241-BT")
+        self.assertTrue(result.ok)
+        self.assertIn("PM-241-BT", result.message)
+        self.assertIn("approuvée", result.message)
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ["bluetoothctl", "--agent", "NoInputNoOutput", "pair", "AA:BB:CC:DD:EE:FF"])
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ["trust", "AA:BB:CC:DD:EE:FF"])
+
+    def test_already_paired_counts_as_success(self):
+        outputs = [self._done("Failed to pair: org.bluez.Error.AlreadyExists\n"), self._done("trust succeeded\n")]
+        with mock.patch.object(printer.subprocess, "run", side_effect=outputs):
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF")
+        self.assertTrue(result.ok)
+
+    def test_authentication_failure_explains_the_pin(self):
+        with mock.patch.object(printer.subprocess, "run",
+                               return_value=self._done("Failed to pair: org.bluez.Error.AuthenticationFailed\n")):
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF", "PM-241-BT")
+        self.assertFalse(result.ok)
+        self.assertIn("PIN", result.message)
+        self.assertIn("0000", result.message)
+
+    def test_invalid_mac_is_rejected_without_calling_bluetoothctl(self):
+        with mock.patch.object(printer.subprocess, "run") as run:
+            result = printer.pair_bluetooth("pas-une-mac")
+        self.assertFalse(result.ok)
+        run.assert_not_called()
+
+    def test_timeout_and_missing_tool_are_explained(self):
+        with mock.patch.object(printer.subprocess, "run", side_effect=subprocess.TimeoutExpired("bluetoothctl", 30)):
+            self.assertIn("Délai dépassé", printer.pair_bluetooth("AA:BB:CC:DD:EE:FF").message)
+        with mock.patch.object(printer.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertIn("bluetoothctl", printer.pair_bluetooth("AA:BB:CC:DD:EE:FF").message)
+
+    def test_trust_failure_still_keeps_the_pairing(self):
+        outputs = [self._done("Pairing successful\n"), self._done("", "Failed to trust\n")]
+        with mock.patch.object(printer.subprocess, "run", side_effect=outputs):
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF")
+        self.assertTrue(result.ok)
+        self.assertIn("trust", result.message)
+
+    def test_printer_names_are_recognised(self):
+        self.assertTrue(printer.looks_like_printer("PM-241-BT"))
+        self.assertTrue(printer.looks_like_printer("Thermal Printer"))
+        self.assertFalse(printer.looks_like_printer("WH-CH700N"))
 
 
 if __name__ == "__main__":

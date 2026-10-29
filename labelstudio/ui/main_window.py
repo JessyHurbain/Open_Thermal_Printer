@@ -9,8 +9,8 @@ from datetime import datetime
 from PyQt6.QtCore import QSettings, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
+    QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .. import __version__, importer, printer, templates
@@ -24,9 +24,11 @@ from .connection_panel import ConnectionPanel
 from .element_panel import ElementPanel
 from .import_dialog import ImportDialog
 from .label_panel import LabelPanel
+from .pairing_dialog import PairingDialog
 from .workers import Worker
 
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)"
+PRINTER_CHECK_MS = 60_000  # vérification périodique de la joignabilité de l'imprimante
 
 NEW_ELEMENT_DEFAULTS = {
     "text": dict(text="Nouveau texte", font_size=5.0),
@@ -93,6 +95,13 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bottom)
         self.bottom_dock = bottom
 
+        self.printer_state = QLabel("○ Imprimante : inconnue")
+        self.printer_state.setStyleSheet("color: gray; padding: 0 8px;")
+        self.printer_state.setToolTip("État de la liaison, vérifié automatiquement toutes les minutes.")
+        self.statusBar().addPermanentWidget(self.printer_state)
+        self._printer_ok: bool | None = None
+        self._probe: Worker | None = None
+
         self.progress = QProgressBar()
         self.progress.setMaximumWidth(220)
         self.progress.setVisible(False)
@@ -109,6 +118,8 @@ class MainWindow(QMainWindow):
         self.elements_list.currentRowChanged.connect(self._on_list_row)
         self.element_panel.changed.connect(self._element_changed)
         self.label_panel.changed.connect(self._label_changed)
+        self.conn_panel.detectRequested.connect(self.detect_printer)
+        self.conn_panel.pairRequested.connect(self.pair_printer)
         self.conn_panel.testRequested.connect(self.test_connection)
         self.conn_panel.selftestRequested.connect(self.selftest)
 
@@ -116,8 +127,14 @@ class MainWindow(QMainWindow):
         self._code_timer = QTimer(self, singleShot=True, interval=350)
         self._code_timer.timeout.connect(self._update_code_view)
 
+        # Vérification périodique de l'imprimante : en arrière-plan, jamais pendant un envoi
+        self._probe_timer = QTimer(self, interval=PRINTER_CHECK_MS)
+        self._probe_timer.timeout.connect(self.check_printer)
+
         self._load_label(self.label, fit=True)
         self.log(f"Phomemo Label Studio {__version__} démarré.")
+        self._probe_timer.start()
+        QTimer.singleShot(1200, self.check_printer)
 
     # ================================================================== construction
     @staticmethod
@@ -173,6 +190,8 @@ class MainWindow(QMainWindow):
         a_cmd = act("Exporter les commandes brutes…", self.export_commands)
         a_quit = act("Quitter", self.close, "Ctrl+Q")
         self.a_print = act("🖨 Imprimer", self.print_label, "Ctrl+P")
+        self.a_detect = act("🔍 Détecter l'imprimante", self.detect_printer, "Ctrl+D",
+                            "Cherche l'imprimante Bluetooth / USB / série et teste la liaison")
         self.a_test = act("Tester la connexion", self.test_connection)
         a_zin = act("Zoom +", lambda: self._set_zoom(self.canvas.px_per_mm * 1.25), "Ctrl++")
         a_zout = act("Zoom −", lambda: self._set_zoom(self.canvas.px_per_mm / 1.25), "Ctrl+-")
@@ -197,6 +216,7 @@ class MainWindow(QMainWindow):
         for a in (a_zin, a_zout, a_fit):
             mv.addAction(a)
         mi = m.addMenu("&Imprimante")
+        mi.addAction(self.a_detect)
         mi.addAction(self.a_test)
         mi.addAction(self.a_print)
         m.addMenu("&Aide").addAction(a_about)
@@ -212,6 +232,7 @@ class MainWindow(QMainWindow):
         for a in (a_zout, a_zin, a_fit):
             tb.addAction(a)
         tb.addSeparator()
+        tb.addAction(self.a_detect)
         tb.addAction(self.a_test)
         tb.addAction(self.a_print)
 
@@ -418,6 +439,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Opération en cours", "Attendez la fin de l'envoi à l'imprimante.")
             event.ignore()
         elif self._confirm_discard():
+            self._probe_timer.stop()
+            if self._probe and self._probe.isRunning():
+                self._probe.wait(4000)  # laisse la vérification en cours se terminer
             event.accept()
         else:
             event.ignore()
@@ -443,6 +467,7 @@ class MainWindow(QMainWindow):
         self.log(busy_text)
         self.conn_panel.set_busy(True)
         self.a_print.setEnabled(False)
+        self.a_detect.setEnabled(False)
         self.a_test.setEnabled(False)
         self.progress.setValue(0)
         self.progress.setVisible(True)
@@ -459,6 +484,7 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.conn_panel.set_busy(False)
         self.a_print.setEnabled(True)
+        self.a_detect.setEnabled(True)
         self.a_test.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
@@ -490,8 +516,33 @@ class MainWindow(QMainWindow):
         def ok(size):
             self.log(f"Impression envoyée ({lang}, {size} octets).")
             self.conn_panel.set_status("Dernier envoi : OK", ok=True)
+            self._set_printer_state(True, "Dernier envoi réussi.", announce=False)
 
         self._run(job, f"Envoi de {len(data)} octets ({lang}) via {cfg['type']}…", ok)
+
+    def pair_printer(self) -> None:
+        """Recherche et appaire une imprimante Bluetooth, puis bascule la connexion dessus."""
+        dlg = PairingDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.mac:
+            return
+        self.conn_panel.use_bluetooth(dlg.mac)
+        self.log(f"Imprimante Bluetooth appairée : {dlg.mac}")
+        self.test_connection()
+
+    def detect_printer(self) -> None:
+        """Cherche l'imprimante (Bluetooth appairée, USB, série), remplit la connexion et teste la liaison."""
+        lang = self.label.settings.language
+
+        def ok(detection):
+            self.conn_panel.apply_detection(detection)
+            for device in detection.devices:
+                self.log("• " + device.label)
+            self.log(detection.summary())
+            if detection.result is not None:
+                self.log(("✔ " if detection.result.ok else "✘ ") + detection.result.message)
+
+        self._run(lambda progress, message: printer.detect_printer(progress, message, lang),
+                  "Recherche de l'imprimante…", ok)
 
     def test_connection(self) -> None:
         cfg, lang = self.conn_panel.config(), self.label.settings.language
@@ -499,8 +550,46 @@ class MainWindow(QMainWindow):
         def ok(result):
             self.log(("✔ " if result.ok else "✘ ") + result.message)
             self.conn_panel.set_status(result.message, ok=result.ok)
+            self._set_printer_state(result.ok, result.message, announce=False)
 
         self._run(lambda _p: printer.test_connection(cfg, lang), "Test de la connexion…", ok)
+
+    # ================================================================== état de l'imprimante
+    def check_printer(self) -> None:
+        """Vérifie en arrière-plan que l'imprimante répond, sans jamais gêner un envoi en cours."""
+        if (self._worker and self._worker.isRunning()) or (self._probe and self._probe.isRunning()):
+            return
+        cfg, lang = self.conn_panel.config(), self.label.settings.language
+        if cfg["type"] == "bluetooth" and not printer.MAC_RE.match(cfg.get("mac", "")):
+            self._set_printer_state(None, "Choisissez l'imprimante dans l'onglet Connexion.")
+            return
+        if cfg["type"] in ("usb", "serial") and not cfg.get("path"):
+            self._set_printer_state(None, "Choisissez le port dans l'onglet Connexion.")
+            return
+        probe = Worker(lambda _progress: printer.test_connection(cfg, lang, timeout=3.0), self)
+        probe.succeeded.connect(self._on_probe)
+        probe.finished.connect(self._probe_finished)
+        self._probe = probe
+        probe.start()
+
+    def _on_probe(self, result: printer.TestResult) -> None:
+        self._set_printer_state(result.ok, result.message)
+
+    def _probe_finished(self) -> None:
+        self._probe = None
+
+    def _set_printer_state(self, ok: bool | None, detail: str = "", announce: bool = True) -> None:
+        """Met à jour l'indicateur permanent ; ne journalise que les changements d'état."""
+        text = {True: "Imprimante : joignable", False: "Imprimante : injoignable",
+                None: "Imprimante : non configurée"}[ok]
+        color = {True: "#188038", False: "#d93025", None: "gray"}[ok]
+        self.printer_state.setText(f"{'●' if ok is not None else '○'} {text}")
+        self.printer_state.setStyleSheet(f"color: {color}; padding: 0 8px;")
+        self.printer_state.setToolTip(detail or text)
+        if ok is not None and ok != self._printer_ok and announce:
+            self.log(("✔ " if ok else "✘ ") + (detail.splitlines()[0] if detail else text))
+        if ok is not None:
+            self._printer_ok = ok
 
     def selftest(self) -> None:
         cfg, lang = self.conn_panel.config(), self.label.settings.language

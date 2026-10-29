@@ -5,7 +5,7 @@ sur une **Phomemo PM-241-BT** sous **Linux Mint**, en TSPL (ou ZPL), **sans CUPS
 
 ## Fonctions
 
-- **Connexion** : Bluetooth RFCOMM (sockets standard, adresse MAC), USB (`/dev/usb/lp0`), port série (`/dev/ttyUSB0`, `/dev/rfcomm0`…) ; bouton *Tester la connexion* (statut + modèle) et *Auto-test* (SELFTEST).
+- **Connexion** : Bluetooth RFCOMM (sockets standard, adresse MAC), USB (`/dev/usb/lp0`), port série (`/dev/ttyUSB0`, `/dev/rfcomm0`…) ; **détection automatique de l'imprimante** (Bluetooth appairé, USB, série), **appairage Bluetooth depuis l'application**, bouton *Tester la connexion* (statut + modèle) et *Auto-test* (SELFTEST).
 - **Éditeur visuel** : aperçu fidèle, éléments déplaçables à la souris (flèches du clavier : 0,5 mm, avec Maj : 2 mm), ordre des calques, duplication, zoom (Ctrl + molette).
 - **Éléments** : texte (police, taille, gras/italique, alignement, multi-lignes), code-barres (Code 128, Code 39, EAN-13, EAN-8, UPC-A), QR code (4 niveaux de correction), images/logos (seuil, Floyd-Steinberg ou tramage de Bayer, inversion), rectangles et traits. Rotation 0/90/180/270° pour chacun.
 - **Format** : formats prédéfinis (100×150 mm, 50×30 mm…) ou libre, en **mm ou en points**, 203/300 dpi, gap / repère noir / continu, noirceur, vitesse, copies.
@@ -54,9 +54,15 @@ Alternative sans pip pour PyQt : `sudo apt install python3-pyqt6` puis `python3 
 
 ## Connecter l'imprimante
 
+**Détection automatique.** Onglet **Connexion** → **🔍 Détecter l'imprimante** (ou menu *Imprimante*, Ctrl+D) : l'application cherche les appareils utilisables, retient le plus probable — une Phomemo reconnue à son nom, sinon un port USB, puis un port série ou `rfcomm` — remplit la connexion et **teste aussitôt la liaison**. Un appareil Bluetooth appairé qui n'est pas une imprimante (casque, enceinte…) est listé mais jamais retenu : mieux vaut aucun choix qu'un mauvais. Si l'imprimante est allumée mais pas encore appairée, un scan Bluetooth borné (quelques secondes) la signale : appairez-la avec *Appairer…*, puis relancez la détection.
+
+**Appairage.** Onglet **Connexion** → *Appairer…* : l'application cherche les appareils à portée, met en avant celui qui ressemble à une imprimante, l'appaire puis l'approuve (*trust*) via BlueZ, avec le code PIN par défaut **0000**. Aucun terminal n'est nécessaire ; si l'imprimante en exige un autre, le message d'erreur l'indique et l'appairage manuel ci-dessous reste possible.
+
+**État en continu.** La barre d'état affiche en permanence l'état de la liaison — **● Imprimante : joignable**, **injoignable** ou **non configurée** (le survol donne le détail de la dernière réponse). Elle est vérifiée toutes les minutes en arrière-plan, jamais pendant une impression, et remise à jour après chaque test ou envoi réussi.
+
 ### Bluetooth (RFCOMM)
 
-1. Allumez l'imprimante, puis appairez-la **une fois** (Menu → Bluetooth, ou en ligne de commande) :
+1. Allumez l'imprimante, puis appairez-la **une fois** — avec le bouton *Appairer…* de l'application (plus haut) ou en ligne de commande :
    ```bash
    bluetoothctl
    power on
