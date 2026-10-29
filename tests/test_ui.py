@@ -17,20 +17,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # avant toute création d
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
-from PyQt6.QtGui import QMouseEvent  # noqa: E402
+from PyQt6.QtGui import QColor, QIcon, QMouseEvent, QPixmap  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QMessageBox, QStyleOptionViewItem  # noqa: E402
+from PyQt6.QtWidgets import (  # noqa: E402
+    QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem,
+)
 
 from labelstudio import printer, templates  # noqa: E402
 from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
 from labelstudio.ui.element_list import (  # noqa: E402
-    DETAIL_ROLE, ICON_ROLE, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
+    DETAIL_ROLE, ICON_ROLE, ICON_WIDTH, LEFT_MARGIN, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
 )
 from labelstudio.ui.canvas import (  # noqa: E402
     GUIDE_COLOR, MARGIN, ORIGIN, RULER, LabelCanvas, alignment_offset, ruler_steps,
 )
 from labelstudio.ui.connection_panel import ConnectionPanel  # noqa: E402
-from labelstudio.ui.main_window import MainWindow  # noqa: E402
+from labelstudio.ui.main_window import ADD_BUTTON_HEIGHT, MainWindow  # noqa: E402
 from labelstudio.ui.pairing_dialog import PairingDialog  # noqa: E402
 
 _APP: QApplication | None = None
@@ -442,6 +444,21 @@ class ElementListTests(unittest.TestCase):
         after = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE).toImage()
         self.assertNotEqual(before, after)
 
+    def test_thumbnail_stays_inside_its_frame(self):
+        """Le style ne doit pas redessiner la miniature hors du cadre (icône qui dépasse à gauche)."""
+        items = self.win.elements_list
+        items.resize(320, 3 * ROW_HEIGHT)
+        pixmap = QPixmap(THUMB_SIZE, THUMB_SIZE)
+        pixmap.fill(QColor("red"))  # couleur absente de l'interface : toute tache rouge vient d'elle
+        items.item(0).setIcon(QIcon(pixmap))
+        image = items.viewport().grab().toImage()
+        frame_left = LEFT_MARGIN + (ICON_WIDTH - THUMB_SIZE) // 2  # même calcul que le délégué
+        red = [x for x in range(image.width()) for y in range(ROW_HEIGHT)
+               if image.pixelColor(x, y).name() == "#ff0000"]
+        self.assertTrue(red, "la miniature n'a pas été peinte")
+        self.assertGreaterEqual(min(red), frame_left)
+        self.assertLessEqual(max(red), frame_left + THUMB_SIZE)
+
     def test_rows_are_tall_enough_for_two_lines(self):
         items = self.win.elements_list
         self.assertIsInstance(items.itemDelegate(), ElementItemDelegate)
@@ -453,6 +470,57 @@ class ElementListTests(unittest.TestCase):
         self.win.element_panel.name.setText("Mon cadre")
         self.assertEqual(self.win.elements_list.item(0).text(), "Mon cadre")
         self.assertEqual(self.win.label.elements[0].name, "Mon cadre")
+
+
+class AddButtonTests(unittest.TestCase):
+    """Boutons d'ajout : icônes et légendes sur deux colonnes, bloc centré."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+        # Affichée hors écran : les boutons n'ont leur géométrie réelle qu'une fois mis en page.
+        self.win.resize(1440, 900)
+        self.win.show()
+        QApplication.processEvents()
+        self.buttons = [b for b in self.win.elements_list.parentWidget().findChildren(QPushButton)
+                        if b.findChild(QLabel, "kindGlyph") is not None]
+
+    def test_glyphs_and_captions_form_two_columns(self):
+        self.assertEqual(len(self.buttons), 5)
+        glyphs = {b.findChild(QLabel, "kindGlyph").x() for b in self.buttons}
+        captions = {b.findChild(QLabel, "kindCaption").x() for b in self.buttons}
+        self.assertEqual(len(glyphs), 1, "les icônes ne sont pas sur une même colonne")
+        self.assertEqual(len(captions), 1, "les légendes ne sont pas sur une même colonne")
+
+    def test_the_block_is_centred_and_the_rows_have_one_height(self):
+        self.assertEqual({b.height() for b in self.buttons}, {ADD_BUTTON_HEIGHT})
+        for b in self.buttons:
+            glyph = b.findChild(QLabel, "kindGlyph")
+            caption = b.findChild(QLabel, "kindCaption")
+            centre = (glyph.x() + caption.x() + caption.width()) / 2
+            self.assertAlmostEqual(centre, b.width() / 2, delta=1.5,
+                                   msg=f"bloc décentré : {b.accessibleName()}")
+
+    def test_clicking_a_caption_adds_the_element(self):
+        """Les libellés laissent passer les clics : c'est le bouton qui doit réagir."""
+        button = self.buttons[0]
+        caption = button.findChild(QLabel, "kindCaption")
+        before = len(self.win.label.elements)
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton,
+                         pos=caption.geometry().center())
+        self.assertEqual(len(self.win.label.elements), before + 1)
+        self.assertEqual(self.win.label.elements[-1].kind, "text")
 
 
 class GridMenuTests(unittest.TestCase):

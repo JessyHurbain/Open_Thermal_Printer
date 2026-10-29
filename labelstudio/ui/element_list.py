@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QStyle, QStyledItemDelegate, QStyleOpt
 ICON_ROLE = Qt.ItemDataRole.UserRole + 1
 DETAIL_ROLE = Qt.ItemDataRole.UserRole + 2
 
+LEFT_MARGIN = 6  # marge avant la miniature
 ICON_WIDTH = 32  # place réservée à la miniature
 ROW_HEIGHT = 46  # deux lignes de texte + un peu d'air
 THUMB_SIZE = 28  # côté de la miniature du rendu
@@ -29,6 +30,11 @@ class ElementItemDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         title = opt.text
         opt.text = ""  # le fond et la sélection sont dessinés par le style, pas le texte
+        # `initStyleOption` reprend aussi la miniature : sans cela le style la dessinerait
+        # une seconde fois, à sa taille standard et à sa propre position, et un morceau
+        # d'icône dépasserait à gauche du cadre dessiné plus bas.
+        opt.icon = QIcon()
+        opt.features &= ~QStyleOptionViewItem.ViewItemFeature.HasDecoration
         style = opt.widget.style() if opt.widget is not None else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
@@ -39,7 +45,7 @@ class ElementItemDelegate(QStyledItemDelegate):
 
         painter.save()
         painter.setClipRect(opt.rect.adjusted(2, 0, -2, 0))
-        left = opt.rect.left() + 6
+        left = opt.rect.left() + LEFT_MARGIN
         thumb = index.data(Qt.ItemDataRole.DecorationRole)
         if isinstance(thumb, QIcon) and not thumb.isNull():
             box = QRect(left + (ICON_WIDTH - THUMB_SIZE) // 2,

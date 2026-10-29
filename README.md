@@ -96,7 +96,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 162 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 166 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```

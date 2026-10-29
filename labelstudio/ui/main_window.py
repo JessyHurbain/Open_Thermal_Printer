@@ -9,8 +9,10 @@ from datetime import datetime
 
 from PIL import ImageOps
 
-from PyQt6.QtCore import QSettings, Qt, QTimer
-from PyQt6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QKeySequence, QPainter, QPixmap
+from PyQt6.QtCore import QRect, QSettings, Qt, QTimer
+from PyQt6.QtGui import (
+    QAction, QActionGroup, QColor, QFont, QFontMetrics, QIcon, QImage, QKeySequence, QPainter, QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolBar,
@@ -36,6 +38,10 @@ from .workers import Worker
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)"
 PRINTER_CHECK_MS = 60_000  # vérification périodique de la joignabilité de l'imprimante
 
+ADD_BUTTON_HEIGHT = 28  # hauteur commune des boutons d'ajout, malgré des glyphes différents
+GLYPH_SIZE = 16  # carré réservé au glyphe du type
+GLYPH_GAP = 6  # écart entre le glyphe et sa légende
+
 NEW_ELEMENT_DEFAULTS = {
     "text": dict(text="Nouveau texte", font_size=5.0),
     "barcode": dict(text="123456789012", symbology="code128", bar_height=12.0, module=2),
@@ -43,6 +49,24 @@ NEW_ELEMENT_DEFAULTS = {
     "image": dict(width=25.0),
     "rect": dict(width=40.0, height=20.0, thickness=0.4),
 }
+
+
+def kind_glyph(kind: str, size: int = 16) -> QIcon:
+    """Glyphe du type dessiné dans un carré de taille fixe.
+
+    Écrit dans le texte du bouton, un émoji impose sa propre hauteur et se cale mal sur la
+    ligne de base : « Image » sortait 4 px plus haut que les autres. En carré de taille
+    fixe, les cinq lignes ont le même encombrement.
+    """
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    font = QFont()
+    font.setPixelSize(size - 2)
+    painter.setFont(font)
+    painter.drawText(QRect(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, KIND_ICONS.get(kind, ""))
+    painter.end()
+    return QIcon(pix)
 
 
 class MainWindow(QMainWindow):
@@ -180,9 +204,35 @@ class MainWindow(QMainWindow):
     def _build_elements_dock(self) -> QWidget:
         box = QWidget()
         lay = QVBoxLayout(box)
-        for kind in ("text", "barcode", "qrcode", "image", "rect"):
-            b = QPushButton(f"{KIND_ICONS[kind]} {KIND_LABELS[kind]}")
+        kinds = ("text", "barcode", "qrcode", "image", "rect")
+        # Les légendes ont des largeurs différentes : sans colonne de largeur fixe,
+        # chaque bouton centrerait son propre bloc et les icônes comme les textes
+        # formeraient deux colonnes en dents de scie. On réserve donc la place du plus
+        # long libellé, puis on centre l'ensemble (icône + écart + colonne de texte).
+        text_width = max(QFontMetrics(self.font()).horizontalAdvance(KIND_LABELS[k]) for k in kinds)
+        for kind in kinds:
+            b = QPushButton()
+            b.setAccessibleName(KIND_LABELS[kind])
+            b.setToolTip(f"Ajouter un élément : {KIND_LABELS[kind].lower()}")
+            b.setFixedHeight(ADD_BUTTON_HEIGHT)
             b.clicked.connect(lambda _=False, k=kind: self.add_element(k))
+            row = QHBoxLayout(b)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(GLYPH_GAP)
+            row.addStretch(1)
+            glyph = QLabel()
+            glyph.setObjectName("kindGlyph")
+            glyph.setFixedSize(GLYPH_SIZE, GLYPH_SIZE)
+            glyph.setPixmap(kind_glyph(kind, GLYPH_SIZE).pixmap(GLYPH_SIZE, GLYPH_SIZE))
+            caption = QLabel(KIND_LABELS[kind])
+            caption.setObjectName("kindCaption")
+            caption.setFixedWidth(text_width)
+            for part in (glyph, caption):
+                part.setFont(b.font())
+                # Les libellés laissent passer les clics : le bouton reste cliquable et survolé.
+                part.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                row.addWidget(part)
+            row.addStretch(1)
             lay.addWidget(b)
         lay.addWidget(self.elements_list, 1)
         row = QHBoxLayout()
