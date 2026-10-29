@@ -533,7 +533,7 @@ def _pair_error(low: str, raw: str, label: str) -> str:
         return (f"Appairage refusé pour {label} : code PIN incorrect ou demande annulée. "
                 "L'application utilise 0000 ; si l'imprimante en exige un autre, appairez-la une fois "
                 "avec l'outil Bluetooth de Linux Mint.")
-    if "not available" in low or "does not exist" in low:
+    if "not available" in low or "does not exist" in low or "doesnotexist" in low:
         return (f"{label} n'est plus visible : relancez la recherche, imprimante allumée et en mode appairage.")
     if "in progress" in low:
         return f"Appairage déjà en cours pour {label} : patientez quelques secondes, puis réessayez."
@@ -572,3 +572,39 @@ def pair_bluetooth(mac: str, name: str = "", timeout: float = 30.0) -> PairResul
     if "succeeded" not in f"{trusted.stdout}{trusted.stderr}".lower():
         return PairResult(True, f"{label} est appairée, mais l'approbation (trust) n'a pas été confirmée.")
     return PairResult(True, f"{label} est appairée et approuvée.")
+
+
+@dataclass
+class ForgetResult:
+    ok: bool
+    message: str
+
+
+def forget_bluetooth(mac: str, name: str = "", timeout: float = 15.0) -> ForgetResult:
+    """Retire (oublie) un appareil appairé de BlueZ, sans passer par le terminal.
+
+    L'appareil disparaît des « appareils appairés » : il faudra l'appairer de nouveau pour
+    l'utiliser. Un appareil déjà absent est annoncé comme oublié, pas comme une erreur.
+    """
+    mac = (mac or "").strip().upper()
+    if not MAC_RE.match(mac):
+        return ForgetResult(False, "Adresse MAC invalide (format attendu : AA:BB:CC:DD:EE:FF).")
+    label = name or mac
+    try:
+        removed = _bluetoothctl(["remove", mac], timeout)
+    except FileNotFoundError:
+        return ForgetResult(False, "bluetoothctl est introuvable : installez BlueZ (sudo apt install bluez).")
+    except subprocess.TimeoutExpired:
+        return ForgetResult(False, f"Délai dépassé : {label} n'a pas été oublié. "
+                                   "Vérifiez que le Bluetooth est actif, puis réessayez.")
+    raw = f"{removed.stdout}\n{removed.stderr}"
+    low = raw.lower()
+    if "no default controller" in low or "not ready" in low:
+        return ForgetResult(False, "Adaptateur Bluetooth indisponible : activez le Bluetooth de la machine, "
+                                   "puis réessayez.")
+    if "removed" in low or "success" in low:
+        return ForgetResult(True, f"{label} a été oublié : il n'est plus appairé.")
+    if "not available" in low or "does not exist" in low or "doesnotexist" in low or "not found" in low:
+        return ForgetResult(True, f"{label} n'était plus appairé, rien à retirer.")
+    detail = (raw.strip().splitlines() or ["erreur inconnue"])[-1]
+    return ForgetResult(False, f"Échec de l'oubli de {label} : {detail[:120]}")

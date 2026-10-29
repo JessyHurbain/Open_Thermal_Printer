@@ -324,6 +324,13 @@ class PairTests(unittest.TestCase):
         self.assertIn("PIN", result.message)
         self.assertIn("0000", result.message)
 
+    def test_vanished_device_is_reported(self):
+        with mock.patch.object(printer.subprocess, "run",
+                               return_value=self._done("", "Failed to pair: org.bluez.Error.DoesNotExist\n")):
+            result = printer.pair_bluetooth("AA:BB:CC:DD:EE:FF", "PM-241-BT")
+        self.assertFalse(result.ok)
+        self.assertIn("n'est plus visible", result.message)
+
     def test_invalid_mac_is_rejected_without_calling_bluetoothctl(self):
         with mock.patch.object(printer.subprocess, "run") as run:
             result = printer.pair_bluetooth("pas-une-mac")
@@ -347,6 +354,47 @@ class PairTests(unittest.TestCase):
         self.assertTrue(printer.looks_like_printer("PM-241-BT"))
         self.assertTrue(printer.looks_like_printer("Thermal Printer"))
         self.assertFalse(printer.looks_like_printer("WH-CH700N"))
+
+
+class ForgetTests(unittest.TestCase):
+    @staticmethod
+    def _done(stdout: str = "", stderr: str = "", code: int = 0):
+        return types.SimpleNamespace(stdout=stdout, stderr=stderr, returncode=code)
+
+    def test_forget_removes_the_device(self):
+        with mock.patch.object(printer.subprocess, "run",
+                               return_value=self._done("Device AA:BB:CC:DD:EE:FF removed successfully\n")) as run:
+            result = printer.forget_bluetooth("aa:bb:cc:dd:ee:ff", "PM-241-BT")
+        self.assertTrue(result.ok)
+        self.assertIn("PM-241-BT", result.message)
+        self.assertEqual(run.call_args.args[0],
+                         ["bluetoothctl", "--agent", "NoInputNoOutput", "remove", "AA:BB:CC:DD:EE:FF"])
+
+    def test_already_forgotten_device_is_not_an_error(self):
+        with mock.patch.object(printer.subprocess, "run",
+                               return_value=self._done("", "Failed to remove device: org.bluez.Error.DoesNotExist\n")):
+            result = printer.forget_bluetooth("AA:BB:CC:DD:EE:FF")
+        self.assertTrue(result.ok)
+        self.assertIn("n'était plus appairé", result.message)
+
+    def test_invalid_mac_is_rejected_without_calling_bluetoothctl(self):
+        with mock.patch.object(printer.subprocess, "run") as run:
+            result = printer.forget_bluetooth("pas-une-mac")
+        self.assertFalse(result.ok)
+        run.assert_not_called()
+
+    def test_switch_off_adapter_is_explained(self):
+        with mock.patch.object(printer.subprocess, "run",
+                               return_value=self._done("", "No default controller available\n")):
+            result = printer.forget_bluetooth("AA:BB:CC:DD:EE:FF")
+        self.assertFalse(result.ok)
+        self.assertIn("Adaptateur Bluetooth", result.message)
+
+    def test_timeout_and_missing_tool_are_explained(self):
+        with mock.patch.object(printer.subprocess, "run", side_effect=subprocess.TimeoutExpired("bluetoothctl", 15)):
+            self.assertIn("Délai dépassé", printer.forget_bluetooth("AA:BB:CC:DD:EE:FF").message)
+        with mock.patch.object(printer.subprocess, "run", side_effect=FileNotFoundError):
+            self.assertIn("bluez", printer.forget_bluetooth("AA:BB:CC:DD:EE:FF").message)
 
 
 if __name__ == "__main__":

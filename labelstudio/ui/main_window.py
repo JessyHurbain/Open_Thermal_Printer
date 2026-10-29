@@ -120,6 +120,7 @@ class MainWindow(QMainWindow):
         self.label_panel.changed.connect(self._label_changed)
         self.conn_panel.detectRequested.connect(self.detect_printer)
         self.conn_panel.pairRequested.connect(self.pair_printer)
+        self.conn_panel.forgetRequested.connect(self.forget_printer)
         self.conn_panel.testRequested.connect(self.test_connection)
         self.conn_panel.selftestRequested.connect(self.selftest)
 
@@ -529,6 +530,38 @@ class MainWindow(QMainWindow):
         self.log(f"Imprimante Bluetooth appairée : {dlg.mac}")
         self.test_connection()
 
+    def forget_printer(self) -> None:
+        """Désappaire l'appareil Bluetooth choisi dans l'onglet Connexion, après confirmation."""
+        mac, name = self.conn_panel.selected_paired()
+        if not mac:
+            self.conn_panel.set_status("Aucun appareil appairé à oublier : choisissez-en un dans la liste "
+                                       "ou saisissez son adresse MAC.", ok=False)
+            return
+        label = name or mac
+        answer = QMessageBox.question(
+            self, "Oublier un appareil Bluetooth",
+            f"Retirer {label} ({mac}) des appareils appairés ?\n\n"
+            "L'imprimante devra être appairée de nouveau (bouton « Appairer… ») pour être utilisée "
+            "en Bluetooth.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        def ok(result: printer.ForgetResult) -> None:
+            self.log(("✔ " if result.ok else "✘ ") + result.message)
+            self.conn_panel.set_status(result.message, ok=result.ok)
+            if not result.ok:
+                return
+            self.conn_panel.remove_paired(mac)
+            self.conn_panel.refresh_devices()
+            cfg = self.conn_panel.config()
+            if cfg["type"] == "bluetooth" and not printer.MAC_RE.match(cfg.get("mac", "")):
+                self._set_printer_state(None, "Imprimante Bluetooth oubliée : appairez-la de nouveau.")
+
+        self._run(lambda _p: printer.forget_bluetooth(mac, name), f"Oubli de {label}…", ok)
+
     def detect_printer(self) -> None:
         """Cherche l'imprimante (Bluetooth appairée, USB, série), remplit la connexion et teste la liaison."""
         lang = self.label.settings.language
@@ -567,12 +600,14 @@ class MainWindow(QMainWindow):
             self._set_printer_state(None, "Choisissez le port dans l'onglet Connexion.")
             return
         probe = Worker(lambda _progress: printer.test_connection(cfg, lang, timeout=3.0), self)
-        probe.succeeded.connect(self._on_probe)
+        probe.succeeded.connect(lambda result, probed=cfg: self._on_probe(result, probed))
         probe.finished.connect(self._probe_finished)
         self._probe = probe
         probe.start()
 
-    def _on_probe(self, result: printer.TestResult) -> None:
+    def _on_probe(self, result: printer.TestResult, cfg: dict) -> None:
+        if cfg != self.conn_panel.config():
+            return  # la connexion a changé (oubli, détection…) : ce résultat ne la concerne plus
         self._set_printer_state(result.ok, result.message)
 
     def _probe_finished(self) -> None:

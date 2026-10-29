@@ -15,6 +15,7 @@ class ConnectionPanel(QWidget):
     selftestRequested = pyqtSignal()
     detectRequested = pyqtSignal()
     pairRequested = pyqtSignal()
+    forgetRequested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -42,8 +43,14 @@ class ConnectionPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(self.paired, 1)
         row.addWidget(self.refresh_btn)
-        row.addWidget(self.pair_btn)
         f.addRow("Appareils appairés", row)
+        self.forget_btn = QPushButton("Oublier")
+        self.forget_btn.setToolTip("Retirer l'appareil sélectionné des appareils appairés de BlueZ "
+                                   "(il faudra l'appairer de nouveau pour l'utiliser)")
+        bt_actions = QHBoxLayout()
+        bt_actions.addWidget(self.pair_btn, 1)
+        bt_actions.addWidget(self.forget_btn)
+        f.addRow("", bt_actions)
         self.mac = QLineEdit()
         self.mac.setPlaceholderText("AA:BB:CC:DD:EE:FF")
         self.mac.setInputMask(">HH:HH:HH:HH:HH:HH;_")
@@ -98,6 +105,7 @@ class ConnectionPanel(QWidget):
         self.refresh_btn.clicked.connect(self.refresh_devices)
         self.detect_btn.clicked.connect(self.detectRequested)
         self.pair_btn.clicked.connect(self.pairRequested)
+        self.forget_btn.clicked.connect(self.forgetRequested)
         self.test_btn.clicked.connect(self.testRequested)
         self.selftest_btn.clicked.connect(self.selftestRequested)
         for w in (self.mac, self.usb_path.lineEdit(), self.ser_path.lineEdit()):
@@ -111,7 +119,7 @@ class ConnectionPanel(QWidget):
 
     # ------------------------------------------------------------ état
     def set_busy(self, busy: bool) -> None:
-        for b in (self.detect_btn, self.pair_btn, self.test_btn, self.selftest_btn):
+        for b in (self.detect_btn, self.pair_btn, self.forget_btn, self.test_btn, self.selftest_btn):
             b.setEnabled(not busy)
 
     def set_status(self, text: str, ok: bool | None = None) -> None:
@@ -119,11 +127,15 @@ class ConnectionPanel(QWidget):
         self.status.setStyleSheet(f"color: {color};")
         self.status.setText(text)
 
+    def mac_address(self) -> str:
+        """Adresse saisie, sans les séparateurs vides laissés par le masque de saisie."""
+        text = self.mac.text().strip().upper().replace("_", "")
+        return text if any(ch.isalnum() for ch in text) else ""
+
     def config(self) -> dict:
         kind = self.kind.currentData()
         if kind == "bluetooth":
-            return {"type": "bluetooth", "mac": self.mac.text().strip().upper().replace("_", ""),
-                    "channel": self.channel.value()}
+            return {"type": "bluetooth", "mac": self.mac_address(), "channel": self.channel.value()}
         if kind == "usb":
             return {"type": "usb", "path": self.usb_path.currentText().strip()}
         return {"type": "serial", "path": self.ser_path.currentText().strip(), "baudrate": self.baud.currentData()}
@@ -145,7 +157,7 @@ class ConnectionPanel(QWidget):
         for i in range(self.paired.count()):
             if "PM-241" in self.paired.itemText(i).upper() or "PHOMEMO" in self.paired.itemText(i).upper():
                 self.paired.setCurrentIndex(i)
-                if not self.mac.text().replace(":", "").replace("_", ""):
+                if not self.mac_address():
                     self._pick_paired(i)
         if current:
             self.paired.setCurrentIndex(max(0, self.paired.findData(current)))
@@ -161,6 +173,25 @@ class ConnectionPanel(QWidget):
         mac = self.paired.itemData(index)
         if mac:
             self.mac.setText(mac)
+
+    def selected_paired(self) -> tuple[str, str]:
+        """(MAC, nom) de l'appareil appairé choisi dans la liste, sinon de l'adresse saisie."""
+        mac = (self.paired.currentData() or "").strip().upper()
+        if mac:
+            return mac, self.paired.itemText(self.paired.currentIndex()).rsplit("  (", 1)[0]
+        return self.mac_address(), ""
+
+    def remove_paired(self, mac: str) -> None:
+        """Retire un appareil de la liste après un oubli réussi et vide la MAC s'il était choisi."""
+        mac = (mac or "").strip().upper()
+        position = self.paired.findData(mac)
+        if position >= 0:
+            self.paired.removeItem(position)
+        if self.paired.count() == 0:
+            self.paired.addItem("(aucun appareil appairé détecté)", None)
+        if self.mac_address() == mac:
+            self.mac.clear()
+        self.save()
 
     def use_bluetooth(self, mac: str) -> None:
         """Bascule la connexion sur ce périphérique Bluetooth (après un appairage)."""
