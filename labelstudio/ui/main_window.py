@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from PIL import ImageOps
 
-from PyQt6.QtCore import QRect, QSettings, QSize, Qt, QTimer, QUrl
+from PyQt6.QtCore import QRect, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QAction, QActionGroup, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QImage, QKeySequence,
     QPainter, QPixmap,
@@ -21,7 +21,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import __version__, diagnostics, importer, printer, templates
+from .. import APP_NAME, __version__, diagnostics, importer, printer, templates
+from ..settings import settings as app_settings
 from ..history import History
 from .element_list import DETAIL_ROLE, ICON_ROLE, ElementItemDelegate
 from ..imaging import encode_image_file
@@ -75,7 +76,7 @@ def glyph_icon(glyph: str, size: int = 16) -> QIcon:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Phomemo Label Studio")
+        self.setWindowTitle(APP_NAME)
         self.resize(1400, 900)
         self.setAcceptDrops(True)  # glisser un PDF / une image d'étiquette sur la fenêtre
         self.label: Label = templates.shipping_100x150()
@@ -147,7 +148,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.progress)
 
         # Quadrillage de l'aperçu : mémorisé entre les sessions
-        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self.qs = app_settings()
         self.grid_mm = float(self.qs.value("view/grid_mm", 5.0))
         self.grid_on = self._saved_flag("view/grid", False)
         self.snap_on = self._saved_flag("view/snap", False)
@@ -186,7 +187,7 @@ class MainWindow(QMainWindow):
         self._probe_timer.timeout.connect(self.check_printer)
 
         self._load_label(self.label, fit=True)
-        self.log(f"Phomemo Label Studio {__version__} démarré.")
+        self.log(f"{APP_NAME} {__version__} démarré.")
         self._probe_timer.start()
         QTimer.singleShot(1200, self.check_printer)
 
@@ -460,7 +461,7 @@ class MainWindow(QMainWindow):
     def _set_dirty(self, dirty: bool) -> None:
         self.dirty = dirty
         name = os.path.basename(self.path) if self.path else "sans titre"
-        self.setWindowTitle(f"{'● ' if dirty else ''}{name} — Phomemo Label Studio")
+        self.setWindowTitle(f"{'● ' if dirty else ''}{name} — {APP_NAME}")
 
     # ================================================================== annulation
     def _record(self, immediate: bool = False) -> None:
@@ -877,7 +878,7 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         mac, name = device.config.get("mac", ""), device.name
-        pin = str(QSettings("PhomemoLabelStudio", "LabelStudio").value("pair/pin", "0000"))
+        pin = str(app_settings().value("pair/pin", "0000"))
 
         def ok(result: printer.PairResult) -> None:
             self.log(("✔ " if result.ok else "✘ ") + result.message)
@@ -1092,6 +1093,7 @@ class MainWindow(QMainWindow):
     def about(self) -> None:
         QMessageBox.about(
             self, "À propos",
-            f"<b>Phomemo Label Studio {__version__}</b><br>Conception et impression d'étiquettes thermiques "
-            "(TSPL / ZPL) pour Phomemo PM-241-BT.<br><br>Bluetooth RFCOMM, USB et série — sans CUPS.",
+            f"<b>{APP_NAME} {__version__}</b><br>Conception et impression d'étiquettes thermiques "
+            "(TSPL / ZPL) sur imprimante thermique d'étiquettes — Phomemo PM-241-BT entre autres."
+            "<br><br>Bluetooth RFCOMM, USB et série — sans CUPS.",
         )

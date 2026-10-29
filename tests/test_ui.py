@@ -23,7 +23,9 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
 )
 
-from labelstudio import diagnostics, printer, templates  # noqa: E402
+from labelstudio import APP_NAME, diagnostics, printer, templates  # noqa: E402
+from labelstudio.settings import LEGACY, MIGRATED_KEY, migrate  # noqa: E402
+from labelstudio.settings import settings as app_settings  # noqa: E402
 from labelstudio.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
 from labelstudio.ui.element_list import (  # noqa: E402
     DETAIL_ROLE, ICON_ROLE, ICON_WIDTH, LEFT_MARGIN, ROW_HEIGHT, THUMB_SIZE, ElementItemDelegate,
@@ -76,9 +78,41 @@ def patched_discovery(paired=None, usb=None, serial=None):
 class SettingsSandboxTests(unittest.TestCase):
     def test_settings_never_touch_the_real_configuration(self):
         """Garde-fou : une redirection ratée écrirait dans ~/.config de l'utilisateur."""
-        path = os.path.realpath(QSettings("PhomemoLabelStudio", "LabelStudio").fileName())
-        sandbox = os.path.realpath(_SETTINGS_DIR.name)
-        self.assertTrue(path.startswith(sandbox + os.sep), path)
+        for store in (app_settings(), QSettings(*LEGACY)):
+            path = os.path.realpath(store.fileName())
+            sandbox = os.path.realpath(_SETTINGS_DIR.name)
+            self.assertTrue(path.startswith(sandbox + os.sep), path)
+
+
+class SettingsMigrationTests(unittest.TestCase):
+    """Le renommage ne doit pas faire disparaître les réglages de l'ancienne identité."""
+
+    def setUp(self):
+        self.legacy = QSettings(*LEGACY)
+        self.current = app_settings()
+        for store in (self.legacy, self.current):
+            store.clear()
+            store.sync()
+
+    def test_legacy_values_are_carried_over_once(self):
+        self.legacy.setValue("pair/pin", "1234")
+        self.legacy.setValue("conn/mac", "AA:BB:CC:DD:EE:FF")
+        self.assertTrue(migrate())
+        fresh = app_settings()
+        self.assertEqual(str(fresh.value("pair/pin")), "1234")
+        self.assertEqual(str(fresh.value("conn/mac")), "AA:BB:CC:DD:EE:FF")
+        self.assertTrue(fresh.value(MIGRATED_KEY, False, type=bool))
+        self.assertFalse(migrate())  # marqueur posé : la reprise ne se rejoue plus
+
+    def test_existing_values_are_never_overwritten(self):
+        self.legacy.setValue("pair/pin", "1234")
+        self.current.setValue("pair/pin", "9876")
+        migrate()
+        self.assertEqual(str(app_settings().value("pair/pin")), "9876")
+
+    def test_fresh_install_is_left_alone(self):
+        self.assertFalse(migrate())
+        self.assertFalse(app_settings().contains(MIGRATED_KEY))
 
 
 class ConnectionPanelTests(unittest.TestCase):
@@ -169,7 +203,7 @@ class MainWindowConnectionTests(unittest.TestCase):
 
     def _detect_pending(self, answer):
         asked = []
-        QSettings("PhomemoLabelStudio", "LabelStudio").setValue("pair/pin", "0000")
+        app_settings().setValue("pair/pin", "0000")
 
         def question(_parent, title, *_args, **_kwargs):
             asked.append(title)
@@ -615,7 +649,7 @@ class GridMenuTests(unittest.TestCase):
         single.start()
         self.addCleanup(single.stop)
         # Réglages neutres avant la construction : chaque test part d'un état connu.
-        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self.qs = app_settings()
         for key in ("view/grid", "view/snap", "view/grid_mm"):
             self.qs.remove(key)
         self.win = MainWindow()
@@ -642,6 +676,11 @@ class GridMenuTests(unittest.TestCase):
         self.addCleanup(second.deleteLater)
         self.assertTrue(second.canvas.grid_visible)
         self.assertEqual(second.canvas.grid_mm, 10.0)
+
+    def test_window_title_uses_the_application_name(self):
+        self.assertIn(APP_NAME, self.win.windowTitle())
+        self.win._set_dirty(True)
+        self.assertIn(APP_NAME, self.win.windowTitle())
 
     def test_grid_step_menu_changes_the_step(self):
         self.win.a_snap.trigger()

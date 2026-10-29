@@ -1,7 +1,12 @@
-# Phomemo Label Studio
+# Open Thermal Printer
 
 Application de bureau (Python + PyQt6) pour concevoir et imprimer des étiquettes thermiques
-sur une **Phomemo PM-241-BT** sous **Linux Mint**, en TSPL (ou ZPL), **sans CUPS**.
+sous **Linux**, en TSPL (ou ZPL), **sans CUPS**. Réglée et vérifiée sur une **Phomemo PM-241-BT**,
+elle pilote aussi les autres imprimantes d'étiquettes qui parlent ces deux langages.
+
+> L'application s'appelait « Phomemo Label Studio » : au premier démarrage sous son nouveau nom,
+elle reprend automatiquement les réglages déjà enregistrés (connexion, code PIN, préréglages
+d'import) ; rien à reconfigurer.
 
 ## Fonctions
 
@@ -21,7 +26,7 @@ sur une **Phomemo PM-241-BT** sous **Linux Mint**, en TSPL (ou ZPL), **sans CUPS
 sudo apt update
 sudo apt install python3-venv python3-pip bluez libxcb-cursor0 libxkbcommon-x11-0 fonts-dejavu-core fontconfig
 
-cd phomemo_label_studio
+cd open-thermal-printer
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -96,7 +101,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 175 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 179 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -199,12 +204,13 @@ labelstudio/
   renderer.py               éléments -> bitmaps (aperçu ET impression raster) + géométrie native
   tspl.py / zpl.py          générateurs de trames
   printer.py                connexions Bluetooth RFCOMM / USB / série, test de statut
+  settings.py               réglages QSettings, reprise des réglages de l'ancien nom de l'appli
   diagnostics.py            journal d'erreurs (fichier, rotation) et crochet d'exception
   importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
   ui/error_report.py        boîte de dialogue des erreurs inattendues
-tests/                      175 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      179 tests : cœur, import, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
@@ -226,7 +232,7 @@ outils/captures.py          captures Qt hors écran, données fictives
 
 ### Journal d'erreurs
 
-Les messages du panneau *Journal* sont recopiés dans `~/.local/state/phomemo-label-studio/journal.log` (rotation à 512 Ko, deux sauvegardes). Une exception non rattrapée y laisse sa trace complète **et** affiche une boîte de dialogue qui indique le fichier et propose de l'ouvrir — utile quand l'application est lancée depuis le menu, sans terminal pour lire l'erreur. Le journal ne quitte jamais la machine ; joignez-le à un rapport de bug plutôt que la capture d'écran seule, il contient la séquence exacte des opérations.
+Les messages du panneau *Journal* sont recopiés dans `~/.local/state/open-thermal-printer/journal.log` (rotation à 512 Ko, deux sauvegardes). Une exception non rattrapée y laisse sa trace complète **et** affiche une boîte de dialogue qui indique le fichier et propose de l'ouvrir — utile quand l'application est lancée depuis le menu, sans terminal pour lire l'erreur. Le journal ne quitte jamais la machine ; joignez-le à un rapport de bug plutôt que la capture d'écran seule, il contient la séquence exacte des opérations.
 
 ## Limites connues
 

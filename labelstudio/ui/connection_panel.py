@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .. import printer
+from ..settings import settings as app_settings
 
 
 class ConnectionPanel(QWidget):
@@ -19,7 +20,7 @@ class ConnectionPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self.qs = app_settings()
         root = QVBoxLayout(self)
 
         top = QFormLayout()

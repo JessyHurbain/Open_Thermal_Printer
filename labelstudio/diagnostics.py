@@ -4,7 +4,7 @@ Lancée depuis le menu, l'application n'a pas de terminal : une exception Python
 slot ne laisse aucune trace. Tout est donc écrit dans un fichier (rotation comprise), et
 les exceptions non rattrapées sont en plus signalées à l'utilisateur par `install_hook`.
 
-Le chemin suit la convention XDG : `$XDG_STATE_HOME/phomemo-label-studio/journal.log`,
+Le chemin suit la convention XDG : `$XDG_STATE_HOME/open-thermal-printer/journal.log`,
 soit `~/.local/state/...` par défaut.
 """
 
@@ -19,7 +19,7 @@ import traceback
 from pathlib import Path
 from typing import Callable
 
-APP_FOLDER = "phomemo-label-studio"
+APP_FOLDER = "open-thermal-printer"
 LOG_NAME = "journal.log"
 MAX_BYTES = 512 * 1024  # au-delà, le journal tourne sur deux sauvegardes
 BACKUPS = 2

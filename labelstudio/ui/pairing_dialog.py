@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRegularExpression, QSettings, Qt, QTimer
+from PyQt6.QtCore import QRegularExpression, Qt, QTimer
 from PyQt6.QtGui import QFont, QRegularExpressionValidator
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .. import printer
+from ..settings import settings as app_settings
 from .workers import Worker
 
 
@@ -22,7 +23,7 @@ class PairingDialog(QDialog):
         self.mac: str | None = None  # adresse retenue, lue par la fenêtre principale après acceptation
         self._worker: Worker | None = None
         self._accepted = False
-        self._settings = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self._settings = app_settings()
 
         root = QVBoxLayout(self)
         hint = QLabel("Allumez l'imprimante et mettez-la en mode appairage, puis lancez la recherche. "

@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 
 from PIL import Image
-from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -22,6 +22,7 @@ from .. import importer
 from ..imaging import encode_pil_image
 from ..models import Element, Label, LabelSettings
 from ..renderer import render_label
+from ..settings import settings as app_settings
 from .label_panel import PRESETS
 
 
@@ -164,7 +165,7 @@ class ImportDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Importer des étiquettes de transport (Vinted, Leboncoin…)")
         self.resize(1150, 800)
-        self.qs = QSettings("PhomemoLabelStudio", "LabelStudio")
+        self.qs = app_settings()
         self.base = copy.deepcopy(current)
         self.presets = importer.load_presets(self.qs.value("import/presets", ""))
 

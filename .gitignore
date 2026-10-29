@@ -1,5 +1,6 @@
-# Environnement virtuel (créé par lancer.sh)
+# Environnement virtuel (créé par lancer.sh) et celui des vérifications statiques (README)
 .venv/
+.venv-dev/
 venv/
 env/
 

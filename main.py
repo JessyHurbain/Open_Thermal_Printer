@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Point d'entrée : lance Phomemo Label Studio."""
+"""Point d'entrée : lance Open Thermal Printer."""
 
 import sys
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from labelstudio import diagnostics
+from labelstudio import APP_NAME, diagnostics
+from labelstudio import settings as app_settings
 from labelstudio.ui import error_report
 from labelstudio.ui.main_window import MainWindow
 
 
 def apply_style(app: QApplication) -> None:
     """Habillage commun à l'application et aux captures du README (outils/captures.py)."""
-    app.setApplicationName("Phomemo Label Studio")
+    app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
     # Les icônes ne servent qu'à la barre d'outils : dans les menus, elles nuiraient à la
     # lisibilité en n'apparaissant que sur quelques entrées.
@@ -28,6 +29,9 @@ def apply_style(app: QApplication) -> None:
 def main() -> int:
     app = QApplication(sys.argv)
     apply_style(app)
+    # Renommée « Open Thermal Printer », l'application récupère les réglages de son ancien nom
+    # (connexion, code PIN, préréglages d'import) au premier démarrage.
+    app_settings.migrate()
     # Sans terminal, une exception ne laisserait aucune trace : journal + boîte de dialogue.
     diagnostics.setup()
     diagnostics.install_hook(error_report.report)
