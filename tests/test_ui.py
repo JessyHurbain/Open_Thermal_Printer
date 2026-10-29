@@ -449,6 +449,96 @@ class GridMenuTests(unittest.TestCase):
         self.assertEqual(self.win.canvas.snap_mm(16.0), 20.0)
 
 
+class UndoTests(unittest.TestCase):
+    """Annuler / rétablir : ajout, suppression, déplacement et réglage passent par la même pile."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery():
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("labelstudio.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        self.addCleanup(self.win.deleteLater)
+
+    def _at(self, x_mm: float, y_mm: float) -> QPoint:
+        k = self.win.canvas.px_per_mm
+        return QPoint(int(ORIGIN + x_mm * k), int(ORIGIN + y_mm * k))
+
+    def test_added_element_is_removed_then_put_back(self):
+        count = len(self.win.label.elements)
+        self.assertFalse(self.win.a_undo.isEnabled())
+        self.win.add_element("rect")
+        self.assertEqual(len(self.win.label.elements), count + 1)
+        self.assertTrue(self.win.a_undo.isEnabled())
+        self.win.undo()
+        self.assertEqual(len(self.win.label.elements), count)
+        self.assertTrue(self.win.a_redo.isEnabled())
+        self.win.redo()
+        self.assertEqual(len(self.win.label.elements), count + 1)
+
+    def test_deleted_element_returns_with_its_geometry(self):
+        self.win._select(0)
+        before = self.win.label.elements[0]
+        geometry = (before.kind, before.x, before.y, before.width, before.height)
+        self.win.delete_element()
+        self.assertNotEqual(len(self.win.label.elements), len(templates.shipping_100x150().elements))
+        self.win.undo()
+        back = self.win.label.elements[0]
+        self.assertEqual((back.kind, back.x, back.y, back.width, back.height), geometry)
+
+    def test_pending_setting_change_is_undone_after_being_recorded(self):
+        self.win._select(0)
+        self.win.element_panel.x.setValue(42.0)  # signal « changed » → enregistrement différé
+        self.assertAlmostEqual(self.win.label.elements[0].x, 42.0)
+        self.win.undo()
+        self.assertNotAlmostEqual(self.win.label.elements[0].x, 42.0)
+        self.win.redo()
+        self.assertAlmostEqual(self.win.label.elements[0].x, 42.0)
+
+    def test_dragged_element_returns_to_its_place(self):
+        label = Label(LabelSettings(width_mm=100, height_mm=50), [
+            Element(kind="rect", name="Boîte", x=20.0, y=20.0, width=10.0, height=10.0),
+        ])
+        self.win._load_label(label)
+        self.assertFalse(self.win.a_undo.isEnabled())
+        self.win._select(0)
+        start, end = self._at(25.0, 25.0), self._at(35.0, 27.0)
+        QTest.mousePress(self.win.canvas, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.win.canvas, end)
+        QTest.mouseRelease(self.win.canvas, Qt.MouseButton.LeftButton, pos=end)
+        self.assertAlmostEqual(self.win.label.elements[0].x, 30.0, delta=0.2)
+        self.win.undo()
+        self.assertAlmostEqual(self.win.label.elements[0].x, 20.0, delta=0.1)
+        self.win.redo()
+        self.assertAlmostEqual(self.win.label.elements[0].x, 30.0, delta=0.2)
+
+    def test_saving_clears_the_dirty_mark_and_undo_brings_it_back(self):
+        with tempfile.NamedTemporaryFile(suffix=".label.json", delete=False) as fh:
+            path = fh.name
+        self.addCleanup(os.unlink, path)
+        self.win.path = path
+        self.win.add_element("rect")
+        self.assertTrue(self.win.dirty)
+        self.win.save_file()
+        self.assertFalse(self.win.dirty)
+        self.win.undo()
+        self.assertTrue(self.win.dirty)
+
+    def test_opening_a_document_starts_a_fresh_history(self):
+        self.win.add_element("rect")
+        self.assertTrue(self.win.a_undo.isEnabled())
+        self.win._load_label(templates.blank(100, 50))
+        self.assertFalse(self.win.a_undo.isEnabled())
+        self.assertFalse(self.win.a_redo.isEnabled())
+
+
 class PairingDialogTests(unittest.TestCase):
     def test_entered_pin_is_given_to_the_pairing(self):
         devices = [printer.Nearby("AA:BB:CC:DD:EE:FF", "PM-241-BT", True)]

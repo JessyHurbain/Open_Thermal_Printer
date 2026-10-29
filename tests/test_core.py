@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from PIL import Image
 
 from labelstudio import printer, templates
+from labelstudio.history import History
 from labelstudio.imaging import invert_bytes, pack_bitmap, to_bilevel
 from labelstudio.models import Element, Label, LabelSettings
 from labelstudio.renderer import printer_anchor, render_element, render_label, warnings_for
@@ -23,6 +24,56 @@ from labelstudio.zpl import build_zpl
 
 def one(el: Element, **settings) -> Label:
     return Label(LabelSettings(**settings), [el])
+
+
+class HistoryTests(unittest.TestCase):
+    """Pile d'annulation : parcours des états, branches abandonnées et taille bornée."""
+
+    def test_undo_and_redo_walk_the_states(self):
+        history = History("a")
+        self.assertFalse(history.can_undo)
+        self.assertFalse(history.can_redo)
+        self.assertTrue(history.push("b"))
+        self.assertTrue(history.push("c"))
+        self.assertEqual(history.undo(), "b")
+        self.assertEqual(history.undo(), "a")
+        self.assertIsNone(history.undo())
+        self.assertEqual(history.redo(), "b")
+        self.assertEqual(history.redo(), "c")
+        self.assertIsNone(history.redo())
+
+    def test_identical_state_is_not_stacked(self):
+        history = History("a")
+        self.assertFalse(history.push("a"))
+        self.assertEqual(len(history), 1)
+        self.assertFalse(history.can_undo)
+
+    def test_new_change_drops_the_redo_branch(self):
+        history = History("a")
+        history.push("b")
+        history.undo()
+        history.push("c")
+        self.assertFalse(history.can_redo)
+        self.assertEqual(history.undo(), "a")
+        self.assertEqual(history.redo(), "c")
+
+    def test_limit_forgets_the_oldest_states(self):
+        history = History("s0", limit=3)
+        for i in range(1, 6):
+            history.push(f"s{i}")
+        self.assertEqual(len(history), 3)
+        self.assertEqual(history.undo(), "s4")
+        self.assertEqual(history.undo(), "s3")
+        self.assertIsNone(history.undo())
+
+    def test_reset_starts_a_fresh_history(self):
+        history = History("a")
+        history.push("b")
+        history.reset("z")
+        self.assertEqual(history.state, "z")
+        self.assertEqual(len(history), 1)
+        self.assertFalse(history.can_undo)
+        self.assertFalse(history.can_redo)
 
 
 class ImagingTests(unittest.TestCase):

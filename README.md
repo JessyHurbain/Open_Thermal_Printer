@@ -62,6 +62,8 @@ Cliquez sur un élément dans l'aperçu ou dans la liste : l'onglet **Élément*
 
 **Guides magnétiques.** Pendant un glisser, l'élément s'accroche aux bords et aux centres des autres éléments, ainsi qu'aux bords et au centre de l'étiquette ; une ligne orange en pointillés montre l'alignement retenu. Les trois repères de l'élément — bord de départ, centre, bord d'arrivée — sont candidats, dans les deux sens, et chaque axe s'aligne indépendamment : un élément peut se caler à gauche sur un voisin et au centre horizontalement sur l'étiquette. La tolérance suit le zoom (environ 6 px, plafonnée à 2 mm) : il suffit d'éloigner la souris pour ignorer un guide. Les guides se cumulent avec le quadrillage, qui arrondit d'abord la position. Maintenir **Alt** pendant le glisser suspend l'accrochage pour ce geste — les lignes disparaissent — ce qui permet de poser un élément juste à côté d'un autre sans être attiré.
 
+**Annuler / rétablir.** `Ctrl+Z` revient sur le dernier geste, `Ctrl+Shift+Z` le refait : déplacements à la souris comme au clavier, réglages d'un élément, ajout, duplication, suppression et ordre de la liste, ainsi que les réglages d'étiquette. Les modifications rapprochées — frappe dans un champ, flèches maintenues — forment une seule étape, et l'élément sélectionné le reste quand il existe encore. Nouveau, ouvrir un fichier ou choisir un modèle repartent d'un historique vierge ; la pile conserve les cent derniers états. Les deux commandes sont dans le menu **Édition** et s'activent au fur et à mesure qu'il y a quelque chose à annuler ou à rétablir.
+
 ### 3. Connecter l'imprimante
 
 ![Onglet Connexion, exemple avec une PM-241-BT appairée](docs/screenshots/connexion.png)
@@ -88,12 +90,13 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 | `Ctrl+D` | Détecter l'imprimante |
 | `Ctrl+0`, `Ctrl++`, `Ctrl+-` | Ajuster, zoomer, dézoomer (ou `Ctrl` + molette) |
 | `Ctrl+G` / `Ctrl+Shift+G` | Afficher la grille / aligner les déplacements dessus |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | Annuler / rétablir la dernière modification |
 | `Suppr` | Supprimer l'élément sélectionné |
 
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 129 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 140 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```

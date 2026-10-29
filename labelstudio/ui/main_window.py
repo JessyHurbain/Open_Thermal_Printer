@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import __version__, importer, printer, templates
+from ..history import History
 from ..imaging import encode_image_file
 from ..models import KIND_LABELS, Element, Label
 from ..renderer import render_label, warnings_for
@@ -113,6 +114,10 @@ class MainWindow(QMainWindow):
         self.grid_on = self._saved_flag("view/grid", False)
         self.snap_on = self._saved_flag("view/snap", False)
 
+        # Annulation : l'état réel est posé par _load_label, plus bas
+        self.history = History("{}")
+        self._saved_state = ""
+
         self._build_actions()
         self._apply_grid()
 
@@ -133,6 +138,9 @@ class MainWindow(QMainWindow):
 
         # La génération des commandes est regroupée (anti-rebond) : elle refait un rendu complet
         self._code_timer = QTimer(self, singleShot=True, interval=350)
+        # Les modifications rapprochées (frappe, flèches maintenues) forment une seule étape
+        self._history_timer = QTimer(self, singleShot=True, interval=500)
+        self._history_timer.timeout.connect(self._commit_history)
         self._code_timer.timeout.connect(self._update_code_view)
 
         # Vérification périodique de l'imprimante : en arrière-plan, jamais pendant un envoi
@@ -200,6 +208,8 @@ class MainWindow(QMainWindow):
         a_open = act("Ouvrir…", self.open_file, "Ctrl+O", short="📂 Ouvrir")
         a_save = act("Enregistrer", self.save_file, "Ctrl+S", short="💾 Enregistrer")
         a_saveas = act("Enregistrer sous…", lambda: self.save_file(as_new=True), "Ctrl+Shift+S")
+        self.a_undo = act("Annuler", self.undo, "Ctrl+Z", "Revient à l'état précédent")
+        self.a_redo = act("Rétablir", self.redo, "Ctrl+Shift+Z", "Refait la modification annulée")
         a_import = act("Importer des étiquettes Vinted / Leboncoin…", lambda: self.import_shipping(), "Ctrl+I",
                        "Rogner et imprimer un bordereau PDF ou une image", short="📥 Importer")
         a_png = act("Exporter l'aperçu (PNG)…", self.export_png)
@@ -234,6 +244,9 @@ class MainWindow(QMainWindow):
             mf.addAction(a)
         mf.addSeparator()
         mf.addAction(a_quit)
+        me = m.addMenu("&Édition")
+        me.addAction(self.a_undo)
+        me.addAction(self.a_redo)
         mt = m.addMenu("&Modèles")
         for name, factory in templates.TEMPLATES.items():
             mt.addAction(act(name, lambda _=False, f=factory: self._confirm_discard() and self._load_label(f(), fit=True)))
@@ -283,6 +296,11 @@ class MainWindow(QMainWindow):
         self._rebuild_list()
         self.element_panel.load(None)
         self._set_dirty(False)
+        # Un document neuf part d'un historique vierge
+        self._history_timer.stop()
+        self._saved_state = label.to_json()
+        self.history.reset(self._saved_state)
+        self._update_history_actions()
         if fit:
             QTimer.singleShot(0, self.fit_zoom)
         self._update_code_view()
@@ -320,21 +338,73 @@ class MainWindow(QMainWindow):
             self.elements_list.item(row).setText(self.label.elements[row].display_name())
         self._set_dirty(True)
         self._code_timer.start()
+        self._record()
 
     def _after_edit(self) -> None:
         """Fin d'un déplacement à la souris / au clavier."""
         self._set_dirty(True)
         self._code_timer.start()
+        self._record()
 
     def _label_changed(self) -> None:
         self.canvas.refresh()
         self._set_dirty(True)
         self._code_timer.start()
+        self._record()
 
     def _set_dirty(self, dirty: bool) -> None:
         self.dirty = dirty
         name = os.path.basename(self.path) if self.path else "sans titre"
         self.setWindowTitle(f"{'● ' if dirty else ''}{name} — Phomemo Label Studio")
+
+    # ================================================================== annulation
+    def _record(self, immediate: bool = False) -> None:
+        """Programme l'enregistrement de l'état courant dans la pile d'annulation.
+
+        Différé par défaut : une rafale de modifications (frappe dans un champ,
+        flèches maintenues) ne forme qu'une seule étape.
+        """
+        if immediate:
+            self._commit_history()
+        else:
+            self._history_timer.start()
+
+    def _commit_history(self) -> None:
+        self._history_timer.stop()
+        self.history.push(self.label.to_json())
+        self._update_history_actions()
+
+    def _update_history_actions(self) -> None:
+        self.a_undo.setEnabled(self.history.can_undo)
+        self.a_redo.setEnabled(self.history.can_redo)
+
+    def undo(self) -> None:
+        self._commit_history()  # une modification encore en attente devient une étape
+        state = self.history.undo()
+        if state is not None:
+            self._restore(state)
+
+    def redo(self) -> None:
+        self._commit_history()  # modifier après une annulation abandonne le rétablissement
+        state = self.history.redo()
+        if state is not None:
+            self._restore(state)
+
+    def _restore(self, state: str) -> None:
+        """Réaffiche un état de la pile sans toucher au fichier ni à l'historique."""
+        row = self._selected_index()
+        label = Label.from_json(state)
+        self.label = label
+        self.canvas.set_label(label)
+        self.label_panel.load(label.settings)
+        row = row if 0 <= row < len(label.elements) else -1
+        self._rebuild_list(row)
+        self.canvas.set_selected(row)
+        self.element_panel.load(label.elements[row] if row >= 0 else None)
+        self.canvas.refresh()
+        self._update_code_view()
+        self._set_dirty(state != self._saved_state)
+        self._update_history_actions()
 
     # ================================================================== éléments
     def add_element(self, kind: str) -> None:
@@ -356,6 +426,7 @@ class MainWindow(QMainWindow):
         self._select(len(self.label.elements) - 1)
         self._set_dirty(True)
         self._code_timer.start()
+        self._record(immediate=True)
 
     def delete_element(self) -> None:
         i = self._selected_index()
@@ -368,6 +439,7 @@ class MainWindow(QMainWindow):
         self._select(new)
         self._set_dirty(True)
         self._code_timer.start()
+        self._record(immediate=True)
 
     def duplicate_element(self) -> None:
         i = self._selected_index()
@@ -381,6 +453,7 @@ class MainWindow(QMainWindow):
         self._select(i + 1)
         self._set_dirty(True)
         self._code_timer.start()
+        self._record(immediate=True)
 
     def move_element(self, delta: int) -> None:
         i = self._selected_index()
@@ -394,6 +467,7 @@ class MainWindow(QMainWindow):
         self._select(j)
         self._set_dirty(True)
         self._code_timer.start()
+        self._record(immediate=True)
 
     # ================================================================== zoom
     def _set_zoom(self, px_per_mm: float) -> None:
@@ -443,11 +517,10 @@ class MainWindow(QMainWindow):
 
     def new_label(self) -> None:
         if self._confirm_discard():
-            s = self.label.settings
-            self._load_label(templates.blank(s.width_mm, s.height_mm), fit=True)
-            self.label.settings = copy.deepcopy(s)
-            self.label_panel.load(self.label.settings)
-            self.canvas.refresh()
+            s = copy.deepcopy(self.label.settings)
+            blank = templates.blank(s.width_mm, s.height_mm)
+            blank.settings = s  # le support est conservé, l'historique repart de zéro
+            self._load_label(blank, fit=True)
 
     def open_file(self) -> None:
         if not self._confirm_discard():
@@ -480,6 +553,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Échec de l'enregistrement", str(exc))
             return
         self.path = path
+        self._commit_history()  # l'état enregistré devient la nouvelle référence
+        self._saved_state = self.label.to_json()
         self._set_dirty(False)
         self.log(f"Enregistré : {path}")
 
