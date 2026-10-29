@@ -108,10 +108,10 @@ La CI lance aussi deux vérificateurs statiques (tâche *Analyse statique*) :
 ```bash
 python3 -m venv .venv-dev && .venv-dev/bin/pip install -r requirements-dev.txt
 .venv-dev/bin/ruff check .     # imports inutilisés, variables mortes, pièges (E, F, W, B)
-.venv-dev/bin/mypy             # annotations, sur le cœur pour l'instant
+.venv-dev/bin/mypy             # annotations, paquet entier, interface comprise
 ```
 
-`ruff` et `mypy` sont épinglés dans `requirements-dev.txt` : une nouvelle version peut ajouter des règles, et la CI ne doit pas changer de verdict sans qu'une ligne de code ait bougé. Le périmètre de `mypy` est volontairement partiel — `labelstudio/*.py` est vérifié, `labelstudio/ui/*` et `main.py` sont exemptés dans `pyproject.toml` tant que les annotations partielles de PyQt6 n'auront pas été apprivoisées. Les deux outils se configurent dans `pyproject.toml`, pas en ligne de commande, pour que CI et poste local voient exactement la même chose.
+`ruff` et `mypy` sont épinglés dans `requirements-dev.txt` : une nouvelle version peut ajouter des règles, et la CI ne doit pas changer de verdict sans qu'une ligne de code ait bougé. `mypy` couvre tout le paquet, interface comprise, et vérifie même le corps des fonctions non annotées (`check_untyped_defs`) — c'est là que vivent les gestionnaires de signaux Qt. Reste à faire pour aller plus loin : `disallow_untyped_defs`, qui exigerait d'annoter chaque slot ; c'est un chantier à part, sans effet sur le comportement. Les deux outils se configurent dans `pyproject.toml`, pas en ligne de commande, pour que CI et poste local voient exactement la même chose.
 
 Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique, aucune imprimante et aucune modification de votre configuration ne sont nécessaires. Le script renvoie le code de sortie de la suite (0 si tout passe), donc il s'enchaîne dans un hook ou une intégration continue.
 

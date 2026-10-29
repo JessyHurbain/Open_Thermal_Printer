@@ -26,7 +26,7 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: ruff (imports inutilisés, code mort, pièges)
         run: ruff check .
-      - name: mypy (cœur typé, interface en cours)
+      - name: mypy (annotations et corps des fonctions non annotées)
         run: mypy
 
   tests:

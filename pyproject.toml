@@ -16,10 +16,6 @@ files = ["labelstudio", "main.py"]
 ignore_missing_imports = true  # PIL, qrcode, python-barcode, serial n'embarquent pas d'annotations
 warn_unused_ignores = true
 no_implicit_optional = true
-
-# L'interface s'appuie massivement sur PyQt6, dont les annotations sont partielles
-# (attributs créés dans __init__, valeurs QSettings typées « object ») : elle sera
-# vérifiée progressivement, module par module.
-[[tool.mypy.overrides]]
-module = ["labelstudio.ui.*", "main"]
-ignore_errors = true
+# Vérifie aussi le corps des fonctions non annotées : c'est là que vit l'interface (slots,
+# gestionnaires de signaux), et PyQt6 impose souvent des signatures sans annotation complète.
+check_untyped_defs = true

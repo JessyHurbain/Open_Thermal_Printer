@@ -71,7 +71,7 @@ class CropView(QWidget):
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.fillRect(self._bounds(), QColor("#9aa0a6"))
-        if self._qimg is None:
+        if self._qimg is None or self._img is None:
             p.setPen(QColor("white"))
             p.drawText(self._bounds(), Qt.AlignmentFlag.AlignCenter, "Ouvrez un PDF ou une image\n(ou glissez-le ici)")
             return
@@ -404,10 +404,13 @@ class ImportDialog(QDialog):
             self._keywords[key] = importer.detect_keywords(self.sources[item.path].page_text(item.page))
         return self._keywords[key]
 
-    def _ensure_crop(self, item: QueueItem) -> None:
-        """Rognage initial : préréglage reconnu automatiquement, sinon détection du plus grand bloc."""
+    def _ensure_crop(self, item: QueueItem) -> list[float]:
+        """Rognage initial : préréglage reconnu automatiquement, sinon détection du plus grand bloc.
+
+        Renvoie les fractions de rognage, désormais garanties présentes.
+        """
         if item.crop_fr is not None:
-            return
+            return item.crop_fr
         page = self._item_page(item)
         keywords = self._item_keywords(item)
         name = importer.match_preset(self.presets, keywords, page.size)
@@ -426,6 +429,8 @@ class ImportDialog(QDialog):
                 item.note = "Transporteur non reconnu : rognage automatique du plus grand bloc."
             else:
                 item.note = "Image : rognage automatique du plus grand bloc."
+        assert item.crop_fr is not None  # les deux branches viennent de le renseigner
+        return item.crop_fr
 
     def _select_item(self, row: int) -> None:
         if not 0 <= row < len(self.items):
@@ -433,11 +438,11 @@ class ImportDialog(QDialog):
         self.cur = row
         item = self.items[row]
         page = self._item_page(item)
-        self._ensure_crop(item)
+        crop_fr = self._ensure_crop(item)
         self.view.set_image(page)
         self.view.blocks = importer.find_blocks(page)
         self.detect_label.setText(item.note)
-        self.view.crop = importer.fractions_to_rect(item.crop_fr, page.size)
+        self.view.crop = importer.fractions_to_rect(crop_fr, page.size)
         self.view.update()
         self._refresh_presets()
         self._update_preview()
@@ -538,9 +543,9 @@ class ImportDialog(QDialog):
         self._timer.start()
 
     def _element_for(self, item: QueueItem) -> tuple[Element, tuple[float, float], importer.Placement]:
-        self._ensure_crop(item)
+        crop_fr = self._ensure_crop(item)
         page = self._item_page(item)
-        rect = importer.fractions_to_rect(item.crop_fr, page.size)
+        rect = importer.fractions_to_rect(crop_fr, page.size)
         w_mm, h_mm = self.format_combo.currentData()
         place = importer.build_placement(
             self.sources[item.path], item.page, page, rect, w_mm, h_mm, self.margin.value(),

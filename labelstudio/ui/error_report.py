@@ -31,7 +31,12 @@ def build(exc: BaseException, parent: QWidget | None = None) -> QMessageBox:
     )
     box.setStandardButtons(QMessageBox.StandardButton.Ok)
     journal = box.addButton("Ouvrir le journal", QMessageBox.ButtonRole.ActionRole)
-    journal.clicked.connect(lambda: (_open_journal(), box.accept()))
+
+    def open_and_close() -> None:
+        _open_journal()
+        box.accept()
+
+    journal.clicked.connect(open_and_close)
     return box
 
 

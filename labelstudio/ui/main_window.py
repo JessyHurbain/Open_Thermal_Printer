@@ -6,6 +6,7 @@ import copy
 import os
 import threading
 from datetime import datetime
+from typing import Any, Callable
 
 from PIL import ImageOps
 
@@ -43,7 +44,7 @@ ADD_BUTTON_HEIGHT = 28  # hauteur commune des boutons d'ajout, malgré des glyph
 GLYPH_SIZE = 16  # carré réservé au glyphe du type
 GLYPH_GAP = 6  # écart entre le glyphe et sa légende
 
-NEW_ELEMENT_DEFAULTS = {
+NEW_ELEMENT_DEFAULTS: dict[str, dict[str, Any]] = {
     "text": dict(text="Nouveau texte", font_size=5.0),
     "barcode": dict(text="123456789012", symbology="code128", bar_height=12.0, module=2),
     "qrcode": dict(text="https://exemple.fr", qr_cell=5),
@@ -312,7 +313,7 @@ class MainWindow(QMainWindow):
         me.addAction(self.a_redo)
         mt = m.addMenu("&Modèles")
         for name, factory in templates.TEMPLATES.items():
-            mt.addAction(act(name, lambda _=False, f=factory: self._confirm_discard() and self._load_label(f(), fit=True)))
+            mt.addAction(act(name, lambda _=False, f=factory: self._load_template(f)))
         mv = m.addMenu("&Affichage")
         for a in (a_zin, a_zout, a_fit):
             mv.addAction(a)
@@ -353,6 +354,11 @@ class MainWindow(QMainWindow):
         tb.addAction(self.a_print)
 
     # ================================================================== modèle <-> interface
+    def _load_template(self, factory: Callable[[], Label]) -> None:
+        """Charge un modèle du menu, après confirmation si le document courant a été modifié."""
+        if self._confirm_discard():
+            self._load_label(factory(), fit=True)
+
     def _load_label(self, label: Label, fit: bool = False, path: str | None = None) -> None:
         self.label = label
         self.path = path
