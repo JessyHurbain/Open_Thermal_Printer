@@ -417,7 +417,8 @@ class ImportDialog(QDialog):
             item.crop_fr = list(preset["rect"])
             item.note = f"{importer.keywords_label(keywords)} détecté → préréglage « {name} » appliqué automatiquement."
         else:
-            item.crop_fr = importer.rect_to_fractions(importer.auto_crop(page), page.size)
+            texts = self.sources[item.path].text_blocks(item.page)
+            item.crop_fr = importer.rect_to_fractions(importer.auto_crop(page, texts), page.size)
             if keywords:
                 item.note = (f"{importer.keywords_label(keywords)} détecté, mais aucun préréglage mémorisé : "
                              "rognage automatique. Ajustez puis « Mémoriser… » pour la prochaine fois.")
@@ -449,9 +450,10 @@ class ImportDialog(QDialog):
     def _auto(self) -> None:
         if self.cur < 0:
             return
-        page = self._item_page(self.items[self.cur])
+        item = self.items[self.cur]
+        page = self._item_page(item)
         self.view.blocks = importer.find_blocks(page)
-        self.view.set_rect(importer.auto_crop(page))
+        self.view.set_rect(importer.auto_crop(page, self.sources[item.path].text_blocks(item.page)))
 
     def _tighten(self) -> None:
         if self.cur >= 0 and self.view.crop:

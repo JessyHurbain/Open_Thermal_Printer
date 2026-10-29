@@ -90,6 +90,24 @@ class PageSource:
         except Exception:
             return ""
 
+    def text_blocks(self, page: int = 0) -> list[tuple[str, Rect]]:
+        """Blocs de texte du PDF : (texte, rectangle) en repère PREVIEW_DPI ; vide pour une image."""
+        if not self._doc:
+            return []
+        k = PREVIEW_DPI / 72  # points PDF -> pixels de la page affichée
+        try:
+            raw = self._doc[max(0, min(page, self.page_count - 1))].get_text("blocks")
+        except Exception:
+            return []
+        found = []
+        for block in raw:
+            x0, y0, x1, y1, text = block[:5]
+            if len(block) > 6 and block[6] != 0:  # 1 = image
+                continue
+            if text.strip():
+                found.append((text, (int(x0 * k), int(y0 * k), int(x1 * k), int(y1 * k))))
+        return found
+
     def render_region(self, page: int, rect: Rect, dpi: float) -> Image.Image:
         """Région `rect` (repère PREVIEW_DPI) rendue *directement* à `dpi` : net, sans double rééchantillonnage.
 
@@ -158,12 +176,44 @@ def tighten(img: Image.Image, rect: Rect, pad: int = 0) -> Rect:
     )
 
 
+def _area(rect: Rect) -> int:
+    return (rect[2] - rect[0]) * (rect[3] - rect[1])
+
+
+def _sub_blocks(mask: Image.Image, rect: Rect, gap: int, min_size: int) -> list[Rect]:
+    """Blocs contenus dans `rect` (mêmes règles que `find_blocks`, coordonnées du masque)."""
+    region = mask.crop(rect)
+    found: list[Rect] = []
+    for y0, y1 in _runs(region.getprojection()[1], gap):
+        band = region.crop((0, y0, region.width, y1))
+        for x0, x1 in _runs(band.getprojection()[0], gap):
+            if x1 - x0 >= min_size and y1 - y0 >= min_size:
+                found.append((rect[0] + x0, rect[1] + y0, rect[0] + x1, rect[1] + y1))
+    return found
+
+
+def _split_panels(mask: Image.Image, rect: Rect, gap: int, min_size: int) -> list[Rect]:
+    """Découpe un bloc en panneaux de taille comparable (bordereau + notice côte à côte).
+
+    Les bordereaux Colissimo occupent deux panneaux encadrés : la légende verticale imprimée
+    dans la gouttière (« Étiquette Colissimo, découpez selon les pointillés ») rétrécit le blanc
+    qui les sépare, si bien que la première passe les soude en un seul bloc. On retente avec un
+    blanc plus fin, mais on ne garde le découpage que si les morceaux sont de taille comparable :
+    une étiquette sans cadre, découpée en miettes (texte, code-barres…), reste d'un seul tenant.
+    """
+    parts = _sub_blocks(mask, rect, max(2, gap // 2), min_size)
+    parts.sort(key=_area, reverse=True)
+    if len(parts) < 2 or _area(parts[1]) < 0.6 * _area(parts[0]):
+        return [rect]
+    return parts
+
+
 def find_blocks(img: Image.Image, gap_frac: float = 0.012, min_frac: float = 0.06) -> list[Rect]:
     """Blocs de contenu séparés par du blanc : bandes horizontales puis colonnes dans chaque bande.
 
     `gap_frac` : blanc minimal (en fraction de la plus grande dimension) pour séparer deux blocs.
     `min_frac` : taille minimale d'un bloc (fraction de la plus petite dimension), écarte les miettes.
-    Résultat trié par surface décroissante.
+    Résultat trié par surface décroissante (puis de haut en bas, de gauche à droite).
     """
     # Travail sur une version réduite : la détection reste instantanée même à 300 dpi
     scale = min(1.0, 900 / max(img.size))
@@ -178,22 +228,46 @@ def find_blocks(img: Image.Image, gap_frac: float = 0.012, min_frac: float = 0.0
         for x0, x1 in _runs(band.getprojection()[0], gap):
             if x1 - x0 >= min_size and y1 - y0 >= min_size:
                 blocks.append((x0, y0, x1, y1))
+    blocks = [part for block in blocks for part in _split_panels(mask, block, gap, min_size)]
 
     inv = 1 / scale
     result = [
         (int(x0 * inv), int(y0 * inv), min(img.width, int(x1 * inv) + 1), min(img.height, int(y1 * inv) + 1))
         for x0, y0, x1, y1 in blocks
     ]
-    result.sort(key=lambda r: (r[2] - r[0]) * (r[3] - r[1]), reverse=True)
+    result.sort(key=lambda r: (-_area(r), r[1], r[0]))
     return result
 
 
-def auto_crop(img: Image.Image) -> Rect:
-    """Meilleure hypothèse pour « l'étiquette » : le plus grand bloc, sinon tout le contenu, sinon la page."""
+def auto_crop(img: Image.Image, texts: list[tuple[str, Rect]] | None = None) -> Rect:
+    """Meilleure hypothèse pour « l'étiquette » : le plus grand bloc, sinon tout le contenu, sinon la page.
+
+    `texts` : blocs de texte du document (`PageSource.text_blocks`). Ils servent à écarter la notice
+    quand la feuille porte deux panneaux de taille comparable (bordereau + preuve de dépôt).
+    """
     blocks = find_blocks(img)
     if blocks:
-        return tighten(img, blocks[0])
+        return tighten(img, _label_block(blocks, texts))
     return content_bbox(img) or (0, 0, img.width, img.height)
+
+
+def _label_block(blocks: list[Rect], texts: list[tuple[str, Rect]] | None) -> Rect:
+    """Bloc du bordereau, quand plusieurs blocs de taille comparable coexistent sur la feuille."""
+    rivals = [b for b in blocks if _area(b) >= 0.9 * _area(blocks[0])]
+    if len(rivals) < 2 or not texts:
+        return blocks[0]
+    labels = [b for b in rivals if not _contains_notice(b, texts)]
+    return labels[0] if len(labels) == 1 else blocks[0]
+
+
+def _contains_notice(rect: Rect, texts: list[tuple[str, Rect]]) -> bool:
+    inside = [text for text, r in texts if _center_in(r, rect)]
+    return any(is_notice_text(text) for text in inside)
+
+
+def _center_in(inner: Rect, outer: Rect) -> bool:
+    cx, cy = (inner[0] + inner[2]) // 2, (inner[1] + inner[3]) // 2
+    return outer[0] <= cx <= outer[2] and outer[1] <= cy <= outer[3]
 
 
 # ---------------------------------------------------------------- mise à l'échelle
@@ -342,6 +416,19 @@ def _normalize(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", text.lower())
+
+
+# Mentions qui trahissent une notice ou une preuve de dépôt : ce panneau n'est pas le bordereau à coller.
+NOTICE_MARKERS = (
+    "comment utiliser", "preuve de depot", "conditions generales", "mode d emploi", "notice d utilisation",
+    "a conserver",
+)
+
+
+def is_notice_text(text: str) -> bool:
+    """Vrai si le texte appartient à une notice d'utilisation plutôt qu'au bordereau."""
+    norm = _normalize(text).replace("'", " ").replace("’", " ")
+    return any(marker in norm for marker in NOTICE_MARKERS)
 
 
 def detect_keywords(text: str) -> list[str]:

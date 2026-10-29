@@ -23,6 +23,21 @@ def page_with_label(box=(300, 200, 900, 1000), size=(1240, 1754)) -> Image.Image
     return img
 
 
+def two_panel_page(size=(1700, 1240)) -> Image.Image:
+    """Feuille paysage type Colissimo : bordereau encadré à gauche, notice encadrée à droite,
+    et une légende verticale imprimée dans la gouttière (qui soude les deux panneaux)."""
+    img = Image.new("RGB", size, "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle((40, 40, 800, 1200), outline="black", width=3)  # panneau du bordereau
+    d.rectangle((80, 160, 760, 900), outline="black", width=2)  # cadre de l'étiquette
+    d.rectangle((120, 620, 720, 800), fill="black")  # code-barres 1D
+    d.rectangle((840, 40, 1660, 1200), outline="black", width=3)  # panneau de la notice (un peu plus grand)
+    d.rectangle((880, 120, 1620, 190), fill=(120, 120, 120))  # bandeau de la notice
+    for y in range(200, 1000, 14):  # légende verticale dans la gouttière
+        d.line((818, y, 818, y + 7), fill="black", width=3)
+    return img
+
+
 class BlockTests(unittest.TestCase):
     def test_largest_block_is_the_label(self):
         img = page_with_label()
@@ -42,6 +57,35 @@ class BlockTests(unittest.TestCase):
         ImageDraw.Draw(img).rectangle((700, 100, 1150, 800), outline="black", width=4)
         blocks = importer.find_blocks(img)
         self.assertEqual(len(blocks), 2)
+
+    def test_two_panels_are_separated_in_spite_of_gutter_caption(self):
+        """Colissimo : la légende verticale de la gouttière ne doit pas souder le bordereau et la notice."""
+        img = two_panel_page()
+        blocks = importer.find_blocks(img)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(len([b for b in blocks if b[2] <= 810]), 1)  # un bloc par panneau
+        self.assertEqual(len([b for b in blocks if b[0] >= 830]), 1)
+        # Sans texte (image), le plus grand bloc l'emporte ; avec le texte de la notice, le bordereau.
+        self.assertGreater(importer.auto_crop(img)[0], 830)
+        texts = [("Comment utiliser votre étiquette Colissimo ?", (880, 120, 1620, 190))]
+        x0, _, x1, _ = importer.auto_crop(img, texts)
+        self.assertLessEqual(x0, 45)
+        self.assertLessEqual(x1, 810)
+
+    def test_framed_label_is_not_fragmented(self):
+        """Une étiquette encadrée reste d'un seul tenant, même avec deux zones internes comparables."""
+        img = Image.new("RGB", (1240, 1754), "white")
+        d = ImageDraw.Draw(img)
+        d.rectangle((200, 200, 1040, 1200), outline="black", width=4)
+        d.rectangle((250, 250, 600, 1000), fill="black")
+        d.rectangle((680, 250, 1000, 1000), fill="black")
+        blocks = importer.find_blocks(img)
+        self.assertEqual(len(blocks), 1)
+        x0, y0, x1, y1 = blocks[0]
+        self.assertLessEqual(abs(x0 - 200), 6)
+        self.assertLessEqual(abs(y0 - 200), 6)
+        self.assertLessEqual(abs(x1 - 1041), 6)
+        self.assertLessEqual(abs(y1 - 1201), 6)
 
     def test_tighten_removes_white_margin(self):
         img = page_with_label()
@@ -236,6 +280,12 @@ class CarrierTests(unittest.TestCase):
         self.assertIsNone(importer.match_preset(presets, ["colissimo"], a4))
         self.assertIsNone(importer.match_preset(presets, ["mondial relay"], (1754, 1240)))  # page paysage
         self.assertIsNone(importer.match_preset({"X": {"rect": [0, 0, 1, 1]}}, ["mondial relay"], a4))
+
+    def test_notice_text_is_recognised(self):
+        self.assertTrue(importer.is_notice_text("Preuve de dépôt"))
+        self.assertTrue(importer.is_notice_text("COMMENT UTILISER VOTRE ÉTIQUETTE"))
+        self.assertTrue(importer.is_notice_text("Mode d’emploi"))
+        self.assertFalse(importer.is_notice_text("Destinataire / Recipient\nNum colis : 8B 0014477538 3"))
 
     def test_pdf_text_is_read(self):
         with tempfile.TemporaryDirectory() as tmp:
