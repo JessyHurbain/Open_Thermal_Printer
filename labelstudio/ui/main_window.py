@@ -172,27 +172,36 @@ class MainWindow(QMainWindow):
         return box
 
     def _build_actions(self) -> None:
-        def act(text, slot, shortcut=None, tip=None):
+        def act(text, slot, shortcut=None, tip=None, short=None):
+            """Action de menu ; `short` est le libellé compact affiché dans la barre d'outils.
+
+            Qt sépare les deux : le menu garde la formulation complète, la barre d'outils se
+            contente du libellé court, avec une infobulle rappelant le nom et le raccourci.
+            """
             a = QAction(text, self)
             a.triggered.connect(slot)
+            if short:
+                a.setIconText(short)
             if shortcut:
                 a.setShortcut(QKeySequence(shortcut))
-            if tip:
-                a.setStatusTip(tip)
+            hint = tip or text.rstrip("…")
+            a.setStatusTip(hint)
+            a.setToolTip(hint + (f" ({QKeySequence(shortcut).toString()})" if shortcut else ""))
             return a
 
-        a_new = act("Nouveau", self.new_label, "Ctrl+N")
-        a_open = act("Ouvrir…", self.open_file, "Ctrl+O")
-        a_save = act("Enregistrer", self.save_file, "Ctrl+S")
+        a_new = act("Nouveau", self.new_label, "Ctrl+N", short="📄 Nouveau")
+        a_open = act("Ouvrir…", self.open_file, "Ctrl+O", short="📂 Ouvrir")
+        a_save = act("Enregistrer", self.save_file, "Ctrl+S", short="💾 Enregistrer")
         a_saveas = act("Enregistrer sous…", lambda: self.save_file(as_new=True), "Ctrl+Shift+S")
         a_import = act("Importer des étiquettes Vinted / Leboncoin…", lambda: self.import_shipping(), "Ctrl+I",
-                       "Rogner et imprimer un bordereau PDF ou une image")
+                       "Rogner et imprimer un bordereau PDF ou une image", short="📥 Importer")
         a_png = act("Exporter l'aperçu (PNG)…", self.export_png)
         a_cmd = act("Exporter les commandes brutes…", self.export_commands)
         a_quit = act("Quitter", self.close, "Ctrl+Q")
-        self.a_print = act("🖨 Imprimer", self.print_label, "Ctrl+P")
+        self.a_print = act("🖨 Imprimer", self.print_label, "Ctrl+P", short="🖨 Imprimer")
         self.a_detect = act("🔍 Détecter l'imprimante", self.detect_printer, "Ctrl+D",
-                            "Cherche l'imprimante Bluetooth / USB / série et teste la liaison")
+                            "Cherche l'imprimante Bluetooth / USB / série et teste la liaison",
+                            short="🔍 Détecter")
         self.a_test = act("Tester la connexion", self.test_connection)
         a_zin = act("Zoom +", lambda: self._set_zoom(self.canvas.px_per_mm * 1.25), "Ctrl++")
         a_zout = act("Zoom −", lambda: self._set_zoom(self.canvas.px_per_mm / 1.25), "Ctrl+-")
@@ -222,19 +231,18 @@ class MainWindow(QMainWindow):
         mi.addAction(self.a_print)
         m.addMenu("&Aide").addAction(a_about)
 
+        # Barre d'outils volontairement réduite aux gestes courants, en libellés courts : les
+        # menus restent la référence complète (avec raccourcis), pour ne pas tout afficher deux fois.
         tb = QToolBar("Principal")
         tb.setMovable(False)
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(tb)
         for a in (a_new, a_open, a_save):
             tb.addAction(a)
         tb.addSeparator()
         tb.addAction(a_import)
         tb.addSeparator()
-        for a in (a_zout, a_zin, a_fit):
-            tb.addAction(a)
-        tb.addSeparator()
         tb.addAction(self.a_detect)
-        tb.addAction(self.a_test)
         tb.addAction(self.a_print)
 
     # ================================================================== modèle <-> interface
