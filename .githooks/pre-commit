@@ -29,8 +29,8 @@ while IFS= read -r path; do
         open_thermal_printer/printer.py)   modules="$modules tests.test_core tests.test_ui" ;;
         # modèles, rendu, trames : socle partagé par l'application et l'import
         open_thermal_printer/*)            full=1 ;;
-        # documentation seule : aucun code exécuté, rien à vérifier
-        *.md|.gitignore)          ;;
+        # documentation et images seules : aucun code exécuté, rien à vérifier
+        *.md|.gitignore|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.webp|*.pdf)  ;;
         *)                        full=1 ;;
     esac
 done <<< "$staged"
@@ -48,7 +48,7 @@ elif [ -n "${modules// /}" ]; then
     # shellcheck disable=SC2206
     cmd=(./tester.sh $selection)
 else
-    echo "→ Aucun test concerné (documentation uniquement)"
+    echo "→ Aucun test concerné (documentation ou images uniquement)"
     exit 0
 fi
 
