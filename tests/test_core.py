@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PIL import Image
 
-from open_thermal_printer import diagnostics, printer, templates
+from open_thermal_printer import diagnostics, printer, profiles, templates
 from open_thermal_printer.history import History
 from open_thermal_printer.imaging import invert_bytes, pack_bitmap, to_bilevel
 from open_thermal_printer.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
@@ -869,6 +869,78 @@ class ErrorJournalTests(unittest.TestCase):
         except type(exc):
             info = sys.exc_info()
             sys.excepthook(info[0], info[1], info[2])
+
+
+class ProfileTests(unittest.TestCase):
+    """Profils de périphériques : enregistrement, relecture tolérante, bornes."""
+
+    def test_roundtrip_keeps_every_field(self):
+        profile = profiles.PrinterProfile("Prix 2 pouces", kind="usb", path="/dev/usb/lp1", width_mm=50.0,
+                                         height_mm=30.0, gap_mm=2.5, media="gap", dpi=300, density=12, speed=3)
+        back = profiles.load_profiles(profiles.dump_profiles({"Prix 2 pouces": profile}))
+        self.assertEqual(list(back), ["Prix 2 pouces"])
+        self.assertEqual(back["Prix 2 pouces"], profile)
+
+    def test_bluetooth_identity_survives(self):
+        profile = profiles.PrinterProfile("Colis", mac="aa:bb:cc:dd:ee:ff", channel=3)
+        back = profiles.load_profiles(profiles.dump_profiles({"Colis": profile}))["Colis"]
+        self.assertEqual((back.kind, back.mac, back.channel), ("bluetooth", "AA:BB:CC:DD:EE:FF", 3))
+
+    def test_garbage_is_ignored_without_losing_the_rest(self):
+        self.assertEqual(profiles.load_profiles("pas du json"), {})
+        self.assertEqual(profiles.load_profiles(None), {})
+        self.assertEqual(profiles.load_profiles("[1, 2]"), {})
+        text = '{"Bon": {"name": "Bon"}, "Sans nom": {"name": "  "}, "Cassé": 42}'
+        self.assertEqual(list(profiles.load_profiles(text)), ["Bon"])
+
+    def test_aberrant_values_fall_back_to_usable_ones(self):
+        profile = profiles.from_dict({"name": "X", "dpi": 999, "density": 40, "speed": 0,
+                                      "width_mm": "?", "height_mm": -5, "kind": "laser", "media": "autre"})
+        self.assertIsNotNone(profile)
+        self.assertEqual((profile.dpi, profile.density, profile.speed), (300, 15, 1))  # dpi le plus proche
+        self.assertEqual((profile.width_mm, profile.height_mm), (100.0, 5.0))  # défaut, puis borne basse
+        self.assertEqual((profile.kind, profile.media), ("bluetooth", "gap"))
+
+    def test_connection_matches_the_shape_the_printer_expects(self):
+        self.assertEqual(profiles.PrinterProfile("b", mac="AA:BB", channel=2).connection(),
+                         {"type": "bluetooth", "mac": "AA:BB", "channel": 2})
+        self.assertEqual(profiles.PrinterProfile("u", kind="usb", path="/dev/usb/lp0").connection(),
+                         {"type": "usb", "path": "/dev/usb/lp0"})
+        self.assertEqual(profiles.PrinterProfile("s", kind="serial", path="/dev/ttyUSB0", baud=9600).connection(),
+                         {"type": "serial", "path": "/dev/ttyUSB0", "baudrate": 9600})
+
+    def test_from_parts_reads_the_panel_and_the_label_settings(self):
+        profile = profiles.from_parts(
+            "  Atelier  ",
+            {"type": "serial", "path": "/dev/rfcomm0", "baudrate": 19200},
+            {"width_mm": 50.0, "height_mm": 30.0, "gap_mm": 2.0, "media": "gap",
+             "dpi": 300, "density": 12, "speed": 3},
+        )
+        self.assertEqual(profile.name, "Atelier")
+        self.assertEqual(profile.label_defaults(), {"width_mm": 50.0, "height_mm": 30.0, "gap_mm": 2.0,
+                                                    "media": "gap", "dpi": 300, "density": 12, "speed": 3})
+        self.assertEqual(profile.connection()["baudrate"], 19200)
+
+    def test_label_defaults_never_carry_document_fields(self):
+        """Un profil ne doit pas écraser le contenu de l'étiquette (copies, mode, langue)."""
+        defaults = profiles.PrinterProfile("x").label_defaults()
+        self.assertEqual(set(defaults), set(profiles.LABEL_FIELDS))
+        self.assertNotIn("copies", defaults)
+        self.assertNotIn("language", defaults)
+
+    def test_unique_name_numbers_the_copies(self):
+        profiles_ = {}
+        self.assertEqual(profiles.unique_name(profiles_), "Imprimante")
+        profiles_[profiles.unique_name(profiles_)] = profiles.PrinterProfile("Imprimante")
+        self.assertEqual(profiles.unique_name(profiles_), "Imprimante 2")
+        profiles_["Imprimante 2"] = profiles.PrinterProfile("Imprimante 2")
+        self.assertEqual(profiles.unique_name(profiles_), "Imprimante 3")
+
+    def test_describe_tells_the_device_and_the_settings(self):
+        self.assertIn("AA:BB:CC:DD:EE:FF", profiles.describe(profiles.PrinterProfile("x", mac="AA:BB:CC:DD:EE:FF")))
+        self.assertIn("50 × 30 mm", profiles.describe(profiles.PrinterProfile("x", width_mm=50, height_mm=30)))
+        self.assertIn("adresse à renseigner", profiles.describe(profiles.PrinterProfile("x")))
+        self.assertIn("/dev/usb/lp0", profiles.describe(profiles.PrinterProfile("x", kind="usb", path="/dev/usb/lp0")))
 
 
 if __name__ == "__main__":

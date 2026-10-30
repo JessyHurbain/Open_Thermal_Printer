@@ -31,6 +31,7 @@ from ..renderer import render_element, render_label, warnings_for
 from ..tspl import build_tspl
 from ..zpl import build_zpl
 from .canvas import LabelCanvas
+from ..profiles import LABEL_FIELDS
 from .connection_panel import ConnectionPanel
 from .element_panel import ElementPanel
 from .import_dialog import ImportDialog
@@ -174,6 +175,8 @@ class MainWindow(QMainWindow):
         self.conn_panel.forgetRequested.connect(self.forget_printer)
         self.conn_panel.testRequested.connect(self.test_connection)
         self.conn_panel.selftestRequested.connect(self.selftest)
+        self.conn_panel.label_snapshot = self._label_snapshot
+        self.conn_panel.profileApplied.connect(self._apply_profile_defaults)
 
         # La génération des commandes est regroupée (anti-rebond) : elle refait un rendu complet
         self._code_timer = QTimer(self, singleShot=True, interval=350)
@@ -457,6 +460,29 @@ class MainWindow(QMainWindow):
         self._set_dirty(True)
         self._code_timer.start()
         self._record()
+
+    # ================================================================== profils de périphériques
+    def _label_snapshot(self) -> dict:
+        """Réglages d'étiquette propres au périphérique, tels qu'un profil les mémorise."""
+        return {key: getattr(self.label.settings, key) for key in LABEL_FIELDS}
+
+    def _apply_profile_defaults(self, defaults: dict) -> None:
+        """Porte les réglages d'un profil au document courant, sans toucher à ses éléments.
+
+        Changer de profil, c'est changer d'imprimante : le format, la résolution, la noirceur et
+        la vitesse suivent, l'étiquette en cours de composition reste celle qui est ouverte.
+        """
+        s = self.label.settings
+        for key in LABEL_FIELDS:
+            if key in defaults:
+                setattr(s, key, defaults[key])
+        self.label_panel.load(s)  # recharge les widgets sans re-déclencher leurs signaux
+        self.canvas.refresh()
+        self._set_dirty(True)
+        self._code_timer.start()
+        self._record()
+        self.log(f"Profil appliqué : {s.width_mm:g} × {s.height_mm:g} mm, {s.dpi} dpi, "
+                 f"noirceur {s.density}, vitesse {s.speed}.")
 
     def _set_dirty(self, dirty: bool) -> None:
         self.dirty = dirty

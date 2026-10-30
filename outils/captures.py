@@ -31,13 +31,22 @@ from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from open_thermal_printer import printer, templates  # noqa: E402
+from open_thermal_printer import printer, profiles, templates  # noqa: E402
+from open_thermal_printer.settings import settings as app_settings  # noqa: E402
 from open_thermal_printer.ui.import_dialog import ImportDialog  # noqa: E402
 from open_thermal_printer.ui.main_window import MainWindow  # noqa: E402
 
 OUT = ROOT / "docs" / "screenshots"
 SHOTS = ("editeur", "element", "connexion", "import")
 DEMO_DEVICE = ("AA:BB:CC:DD:EE:FF", "PM-241-BT")  # appareil fictif de la capture « Connexion »
+# Deux profils fictifs — une 4 pouces pour les bordereaux, une 2 pouces pour les prix —, qui
+# illustrent la capture « Connexion » sans rien reprendre de la configuration de l'utilisateur.
+DEMO_PROFILES = (
+    profiles.PrinterProfile("Bordereaux 4 pouces", kind="bluetooth", mac=DEMO_DEVICE[0], channel=1,
+                            width_mm=100.0, height_mm=150.0, gap_mm=2.0, dpi=203, density=8, speed=4),
+    profiles.PrinterProfile("Étiquettes prix 2 pouces", kind="usb", path="/dev/usb/lp0",
+                            width_mm=50.0, height_mm=30.0, gap_mm=2.0, dpi=300, density=12, speed=3),
+)
 
 
 # ---------------------------------------------------------------- outils
@@ -79,6 +88,14 @@ def demo_hardware():
     finally:
         for patch in reversed(patches):
             patch.stop()
+
+
+def demo_profiles() -> None:
+    """Écrit les deux profils fictifs dans le bac à sable (dossier temporaire)."""
+    store = app_settings()
+    store.setValue(profiles.PROFILES_KEY, profiles.dump_profiles({p.name: p for p in DEMO_PROFILES}))
+    store.setValue(profiles.LAST_KEY, DEMO_PROFILES[0].name)
+    store.sync()
 
 
 def window(app: QApplication) -> MainWindow:
@@ -208,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         from main import apply_style  # même habillage que l'application lancée normalement
 
         apply_style(app)
+        demo_profiles()
         print(f"Captures dans {OUT.relative_to(ROOT)} :")
         for name, shot in (("editeur", shot_editeur), ("element", shot_element),
                            ("connexion", shot_connexion), ("import", shot_import)):

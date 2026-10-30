@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QComboBox, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from .. import printer
+from .. import printer, profiles
+from ..profiles import PrinterProfile
 from ..settings import settings as app_settings
 
 
@@ -17,11 +21,37 @@ class ConnectionPanel(QWidget):
     detectRequested = pyqtSignal()
     pairRequested = pyqtSignal()
     forgetRequested = pyqtSignal()
+    # Réglages d'étiquette du profil appliqué : la fenêtre principale les porte au document.
+    profileApplied = pyqtSignal(dict)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.qs = app_settings()
+        # Renseigné par la fenêtre principale : renvoie les réglages d'étiquette courants à
+        # enregistrer dans un profil (le panneau ne connaît pas le document).
+        self.label_snapshot: Callable[[], dict] | None = None
+        self.profiles: dict[str, PrinterProfile] = {}
         root = QVBoxLayout(self)
+
+        # --- profils de périphériques
+        prof = QFormLayout()
+        self.profile = QComboBox()
+        self.profile.setToolTip("Imprimante et réglages qui vont avec (format, résolution, noirceur, vitesse).\n"
+                                "« Appliquer » bascule la connexion et ces réglages ; les éléments de l'étiquette "
+                                "en cours ne sont pas modifiés.")
+        self.profile_apply = QPushButton("Appliquer")
+        self.profile_save = QPushButton("Enregistrer…")
+        self.profile_save.setToolTip("Enregistre la connexion et les réglages d'étiquette actuels sous un nom")
+        self.profile_delete = QPushButton("Supprimer")
+        line = QHBoxLayout()
+        line.addWidget(self.profile, 1)
+        line.addWidget(self.profile_apply)
+        prof.addRow("Profil", line)
+        line = QHBoxLayout()
+        line.addWidget(self.profile_save, 1)
+        line.addWidget(self.profile_delete)
+        prof.addRow("", line)
+        root.addLayout(prof)
 
         top = QFormLayout()
         self.kind = QComboBox()
@@ -102,6 +132,9 @@ class ConnectionPanel(QWidget):
         root.addWidget(self.status)
         root.addStretch(1)
 
+        self.profile_apply.clicked.connect(self.apply_profile)
+        self.profile_save.clicked.connect(self.save_profile)
+        self.profile_delete.clicked.connect(self.delete_profile)
         self.kind.currentIndexChanged.connect(self._kind_changed)
         self.paired.activated.connect(self._pick_paired)
         self.refresh_btn.clicked.connect(self.refresh_devices)
@@ -117,12 +150,16 @@ class ConnectionPanel(QWidget):
         self.baud.currentIndexChanged.connect(self.save)
 
         self._restore()
+        self._load_profiles()
         self.refresh_devices()
 
     # ------------------------------------------------------------ état
     def set_busy(self, busy: bool) -> None:
-        for b in (self.detect_btn, self.pair_btn, self.forget_btn, self.test_btn, self.selftest_btn):
+        for b in (self.detect_btn, self.pair_btn, self.forget_btn, self.test_btn, self.selftest_btn,
+                  self.profile_apply, self.profile_save, self.profile_delete):
             b.setEnabled(not busy)
+        if not busy:
+            self._update_profile_buttons()
 
     def set_status(self, text: str, ok: bool | None = None) -> None:
         color = {True: "#188038", False: "#d93025", None: "gray"}[ok]
@@ -141,6 +178,109 @@ class ConnectionPanel(QWidget):
         if kind == "usb":
             return {"type": "usb", "path": self.usb_path.currentText().strip()}
         return {"type": "serial", "path": self.ser_path.currentText().strip(), "baudrate": self.baud.currentData()}
+
+    # ------------------------------------------------------------ profils de périphériques
+    def _load_profiles(self) -> None:
+        self.profiles = profiles.load_profiles(self.qs.value(profiles.PROFILES_KEY, ""))
+        self._refresh_profiles()
+
+    def _refresh_profiles(self, select: str = "") -> None:
+        """Repeuple la liste ; `select` choisit le profil affiché (sinon le dernier utilisé)."""
+        self.profile.blockSignals(True)
+        self.profile.clear()
+        for name in self.profiles:
+            self.profile.addItem(name)
+        wanted = select or str(self.qs.value(profiles.LAST_KEY, ""))
+        if self.profile.count():
+            self.profile.setCurrentIndex(max(0, self.profile.findText(wanted)))
+        else:
+            self.profile.addItem("(aucun profil enregistré)")
+        self.profile.blockSignals(False)
+        self._update_profile_buttons()
+
+    def _update_profile_buttons(self) -> None:
+        has = bool(self.profiles)
+        self.profile_apply.setEnabled(has)
+        self.profile_delete.setEnabled(has)
+
+    def current_profile(self) -> PrinterProfile | None:
+        return self.profiles.get(self.profile.currentText()) if self.profiles else None
+
+    def save_profile(self) -> None:
+        """Enregistre la connexion et les réglages d'étiquette courants sous un nom."""
+        if self.label_snapshot is None:
+            return
+        default = (self.profile.currentText() if self.profiles else "") or profiles.unique_name(self.profiles)
+        name, accepted = QInputDialog.getText(self, "Enregistrer un profil",
+                                              "Nom du profil (imprimante et ses réglages) :", text=default)
+        name = name.strip()
+        if not accepted or not name:
+            return
+        if name in self.profiles and not self._confirm_overwrite(name):
+            return
+        self.profiles[name] = profiles.from_parts(name, self.config(), self.label_snapshot())
+        self.qs.setValue(profiles.PROFILES_KEY, profiles.dump_profiles(self.profiles))
+        self.qs.setValue(profiles.LAST_KEY, name)
+        self._refresh_profiles(select=name)
+        self.set_status(f"Profil « {name} » enregistré : {profiles.describe(self.profiles[name])}.", ok=True)
+
+    def _confirm_overwrite(self, name: str) -> bool:
+        answer = QMessageBox.question(
+            self, "Remplacer le profil",
+            f"Le profil « {name} » existe déjà.\n\nLe remplacer par la connexion et les réglages actuels ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def delete_profile(self) -> None:
+        profile = self.current_profile()
+        if profile is None:
+            return
+        answer = QMessageBox.question(
+            self, "Supprimer le profil",
+            f"Supprimer le profil « {profile.name} » ?\n\nLa connexion et les réglages actuels ne changent pas.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.profiles.pop(profile.name, None)
+        self.qs.setValue(profiles.PROFILES_KEY, profiles.dump_profiles(self.profiles))
+        if str(self.qs.value(profiles.LAST_KEY, "")) == profile.name:
+            self.qs.remove(profiles.LAST_KEY)
+        self._refresh_profiles()
+        self.set_status(f"Profil « {profile.name} » supprimé.")
+
+    def apply_profile(self) -> None:
+        """Passe la connexion et les réglages d'impression sur le profil choisi."""
+        profile = self.current_profile()
+        if profile is None:
+            return
+        self._apply_connection(profile)
+        self.qs.setValue(profiles.LAST_KEY, profile.name)
+        self.profileApplied.emit(profile.label_defaults())
+        self.set_status(f"Profil « {profile.name} » appliqué : {profiles.describe(profile)}.", ok=True)
+
+    def _apply_connection(self, profile: PrinterProfile) -> None:
+        """Reprend la connexion d'un profil dans les widgets, sans toucher aux réglages d'étiquette."""
+        index = self.kind.findData(profile.kind)
+        if index >= 0:
+            self.kind.setCurrentIndex(index)
+            self.stack.setCurrentIndex(index)
+        if profile.kind == "bluetooth":
+            self.refresh_devices()  # l'appareil doit figurer dans la liste s'il est appairé
+            self.mac.setText(profile.mac)
+            self.channel.setValue(profile.channel)
+            position = self.paired.findData(profile.mac)
+            if position >= 0:
+                self.paired.setCurrentIndex(position)
+        elif profile.kind == "usb":
+            self.usb_path.setCurrentText(profile.path)
+        else:
+            self.ser_path.setCurrentText(profile.path)
+            self.baud.setCurrentIndex(max(0, self.baud.findData(profile.baud)))
+        self.save()
 
     # ------------------------------------------------------------ interne
     def _kind_changed(self) -> None:

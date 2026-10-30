@@ -20,10 +20,10 @@ from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
 from PyQt6.QtGui import QColor, QIcon, QMouseEvent, QPixmap  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
-    QApplication, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
+    QApplication, QInputDialog, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
 )
 
-from open_thermal_printer import APP_NAME, diagnostics, printer, templates  # noqa: E402
+from open_thermal_printer import APP_NAME, diagnostics, printer, profiles, templates  # noqa: E402
 from open_thermal_printer.settings import LEGACY, MIGRATED_KEY, migrate  # noqa: E402
 from open_thermal_printer.settings import settings as app_settings  # noqa: E402
 from open_thermal_printer.models import KIND_ICONS, Element, Label, LabelSettings  # noqa: E402
@@ -158,6 +158,145 @@ class ConnectionPanelTests(unittest.TestCase):
                 detection = printer.Detection([device], device, printer.TestResult(True, "ok"))
                 self.panel.apply_detection(detection)
                 self.assertEqual(self.panel.config(), expected)
+
+
+class PrinterProfileTests(unittest.TestCase):
+    """Profils de périphériques : enregistrer, appliquer, supprimer depuis l'onglet Connexion."""
+
+    def setUp(self):
+        store = app_settings()
+        store.clear()
+        store.sync()
+        for patch in patched_discovery(paired=[("AA:BB:CC:DD:EE:FF", "PM-241-BT")]):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.panel = ConnectionPanel()
+        self.addCleanup(self.panel.deleteLater)
+        self.panel.kind.setCurrentIndex(self.panel.kind.findData("bluetooth"))
+        self.panel.mac.setText("AA:BB:CC:DD:EE:FF")
+        self.settings = {"width_mm": 50.0, "height_mm": 30.0, "gap_mm": 2.0,
+                         "media": "gap", "dpi": 300, "density": 12, "speed": 3}
+        self.panel.label_snapshot = lambda: dict(self.settings)
+
+    def _save(self, name: str) -> None:
+        with mock.patch.object(QInputDialog, "getText", return_value=(name, True)):
+            self.panel.save_profile()
+
+    def test_saving_records_connection_and_label_defaults(self):
+        self._save("Prix 2 pouces")
+        self.assertIn("Prix 2 pouces", self.panel.profiles)
+        profile = self.panel.profiles["Prix 2 pouces"]
+        self.assertEqual(profile.connection(), {"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF", "channel": 1})
+        self.assertEqual(profile.label_defaults(), self.settings)
+        # mémorisé dans QSettings, pas seulement à l'écran
+        stored = profiles.load_profiles(app_settings().value(profiles.PROFILES_KEY, ""))
+        self.assertEqual(stored["Prix 2 pouces"].label_defaults(), self.settings)
+        self.assertEqual(self.panel.profile.currentText(), "Prix 2 pouces")
+
+    def test_an_empty_name_saves_nothing(self):
+        with mock.patch.object(QInputDialog, "getText", return_value=("   ", True)):
+            self.panel.save_profile()
+        self.assertEqual(self.panel.profiles, {})
+
+    def test_applying_switches_connection_and_announces_the_label_defaults(self):
+        self._save("Prix")
+        seen = []
+        self.panel.profileApplied.connect(seen.append)
+        # on s'éloigne du profil : autre imprimante, autres réglages
+        self.panel.mac.setText("11:22:33:44:55:66")
+        self.panel.channel.setValue(4)
+        self.settings.update({"width_mm": 100.0, "height_mm": 150.0, "dpi": 203, "density": 6})
+        self.panel.apply_profile()
+        self.assertEqual(self.panel.config(), {"type": "bluetooth", "mac": "AA:BB:CC:DD:EE:FF", "channel": 1})
+        self.assertEqual(seen, [{"width_mm": 50.0, "height_mm": 30.0, "gap_mm": 2.0,
+                                 "media": "gap", "dpi": 300, "density": 12, "speed": 3}])
+        self.assertEqual(app_settings().value(profiles.LAST_KEY), "Prix")  # dernier profil utilisé
+
+    def test_applying_never_touches_the_document_content(self):
+        """Le profil ne transporte que les réglages d'impression, jamais des éléments d'étiquette."""
+        self._save("Prix")
+        self.assertNotIn("elements", self.panel.profiles["Prix"].label_defaults())
+        self.assertEqual(set(self.panel.profiles["Prix"].label_defaults()), set(profiles.LABEL_FIELDS))
+
+    def test_a_refused_overwrite_keeps_the_stored_profile(self):
+        self._save("Prix")
+        self.settings.update({"dpi": 203, "density": 4})
+        with mock.patch.object(QInputDialog, "getText", return_value=("Prix", True)), \
+             mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+            self.panel.save_profile()
+        self.assertEqual(self.panel.profiles["Prix"].dpi, 300)  # inchangé
+
+    def test_an_accepted_overwrite_replaces_the_profile(self):
+        self._save("Prix")
+        self.settings.update({"dpi": 203, "density": 4})
+        with mock.patch.object(QInputDialog, "getText", return_value=("Prix", True)), \
+             mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            self.panel.save_profile()
+        self.assertEqual((self.panel.profiles["Prix"].dpi, self.panel.profiles["Prix"].density), (203, 4))
+
+    def test_deleting_asks_first_and_leaves_the_connection_alone(self):
+        self._save("Prix")
+        with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+            self.panel.delete_profile()
+        self.assertIn("Prix", self.panel.profiles)  # refus : rien ne bouge
+        with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            self.panel.delete_profile()
+        self.assertEqual(self.panel.profiles, {})
+        self.assertEqual(app_settings().value(profiles.PROFILES_KEY, ""), "{}")
+        self.assertEqual(self.panel.config()["mac"], "AA:BB:CC:DD:EE:FF")  # connexion conservée
+        self.assertFalse(self.panel.profile_apply.isEnabled())  # plus de profil à appliquer
+
+    def test_profiles_are_relaunched_with_the_panel(self):
+        self._save("Prix")
+        again = ConnectionPanel()
+        self.addCleanup(again.deleteLater)
+        self.assertEqual(list(again.profiles), ["Prix"])
+        self.assertEqual(again.profile.currentText(), "Prix")
+
+
+class MainWindowProfileTests(unittest.TestCase):
+    """Le profil appliqué change les réglages du document, jamais son contenu."""
+
+    def setUp(self):
+        probe = mock.patch.object(printer, "test_connection",
+                                  return_value=printer.TestResult(True, "Liaison établie."))
+        probe.start()
+        self.addCleanup(probe.stop)
+        for patch in patched_discovery(paired=[("AA:BB:CC:DD:EE:FF", "PM-241-BT")]):
+            patch.start()
+            self.addCleanup(patch.stop)
+        single = mock.patch("open_thermal_printer.ui.main_window.QTimer.singleShot")
+        single.start()
+        self.addCleanup(single.stop)
+        store = app_settings()
+        store.clear()
+        store.sync()
+        self.win = MainWindow()
+        self.win._probe_timer.stop()
+        pump(0.15)
+        self.addCleanup(self.win.deleteLater)
+
+    def test_applying_a_profile_rewrites_the_print_settings_but_not_the_label(self):
+        panel, settings = self.win.conn_panel, self.win.label.settings
+        panel.kind.setCurrentIndex(panel.kind.findData("bluetooth"))
+        panel.mac.setText("AA:BB:CC:DD:EE:FF")
+        settings.width_mm, settings.height_mm = 50.0, 30.0
+        settings.dpi, settings.density, settings.speed = 300, 12, 3
+        with mock.patch.object(QInputDialog, "getText", return_value=("Prix 2 pouces", True)):
+            panel.save_profile()
+
+        # l'utilisateur revient à une autre imprimante et à d'autres réglages
+        settings.width_mm, settings.height_mm = 100.0, 150.0
+        settings.dpi, settings.density, settings.speed = 203, 8, 5
+        elements = len(self.win.label.elements)
+        panel.apply_profile()
+
+        self.assertEqual((settings.width_mm, settings.height_mm), (50.0, 30.0))
+        self.assertEqual((settings.dpi, settings.density, settings.speed), (300, 12, 3))
+        self.assertEqual(len(self.win.label.elements), elements)  # contenu préservé
+        self.assertEqual(self.win.label_panel.dpi.currentData(), 300)  # panneau rechargé
+        self.assertTrue(self.win.dirty)
+        self.assertIn("Profil appliqué", self.win.log_view.toPlainText())
 
 
 class MainWindowConnectionTests(unittest.TestCase):

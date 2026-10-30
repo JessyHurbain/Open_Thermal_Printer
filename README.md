@@ -13,6 +13,7 @@ d'import) ; rien à reconfigurer.
 
 ## Fonctions
 
+- **Profils de périphériques** : enregistrez une imprimante avec ses réglages propres — format, résolution, noirceur, vitesse — et basculez de l'une à l'autre en un clic (une 4 pouces pour les bordereaux 100 × 150 mm, une 2 pouces pour les étiquettes de prix 50 × 30 mm).
 - **Connexion** : Bluetooth RFCOMM (sockets standard, adresse MAC), USB (`/dev/usb/lp0`), port série (`/dev/ttyUSB0`, `/dev/rfcomm0`…) ; **détection automatique de l'imprimante** (Bluetooth appairé, USB, série), **appairage et oubli d'un appareil Bluetooth depuis l'application**, bouton *Tester la connexion* (statut + modèle) et *Auto-test* (SELFTEST).
 - **Éditeur visuel** : aperçu fidèle, éléments déplaçables à la souris (flèches du clavier : 0,5 mm, avec Maj : 2 mm), ordre des calques, duplication, zoom (Ctrl + molette).
 - **Éléments** : texte (police, taille, gras/italique, alignement, multi-lignes), code-barres (Code 128, Code 39, EAN-13, EAN-8, UPC-A), QR code (4 niveaux de correction), images/logos (seuil, Floyd-Steinberg ou tramage de Bayer, inversion), rectangles et traits. Rotation 0/90/180/270° pour chacun.
@@ -77,7 +78,7 @@ Cliquez sur un élément dans l'aperçu ou dans la liste : l'onglet **Élément*
 
 ![Onglet Connexion, exemple avec une PM-241-BT appairée](docs/screenshots/connexion.png)
 
-Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appairés), USB ou port série. **Détecter l'imprimante** (`Ctrl+D`) cherche et teste toute seule ; *Appairer…* associe une imprimante sans passer par le terminal, *Oublier* la retire de BlueZ. Le voyant en bas à droite indique en permanence si l'imprimante répond. Voir [Connecter l'imprimante](#connecter-limprimante) pour les détails et le dépannage.
+Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appairés), USB ou port série. **Détecter l'imprimante** (`Ctrl+D`) cherche et teste toute seule ; *Appairer…* associe une imprimante sans passer par le terminal, *Oublier* la retire de BlueZ. En haut, le champ **Profil** bascule d'une imprimante à l'autre avec ses réglages propres (voir [Plusieurs imprimantes : profils](#plusieurs-imprimantes--profils)). Le voyant en bas à droite indique en permanence si l'imprimante répond. Voir [Connecter l'imprimante](#connecter-limprimante) pour les détails et le dépannage.
 
 ### 4. Importer un bordereau Vinted / Leboncoin
 
@@ -105,7 +106,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 180 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 198 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -165,6 +166,14 @@ Les captures du tutoriel sont produites **par l'application elle-même**, en Qt 
 
 **Liaison conservée (Bluetooth).** Entre deux vérifications, la liaison Bluetooth reste ouverte : rouvrir une connexion Bluetooth chaque minute fait clignoter l'appareil côté BlueZ, et le bureau (Cinnamon, GNOME) affiche alors une notification « connecté » puis « déconnecté » en boucle. L'imprimante reste donc connectée à l'ordinateur tant que l'application tourne — un téléphone ne pourra pas s'y connecter pendant ce temps ; fermez l'application pour libérer la liaison. Elle est rendue automatiquement avant chaque impression, test manuel, détection ou désappairage, puis reprise à la vérification suivante.
 
+### Plusieurs imprimantes : profils
+
+Deux imprimantes sur le même poste n'ont pas les mêmes réglages : une 4 pouces sort des bordereaux 100 × 150 mm en 203 dpi, une 2 pouces des étiquettes de prix 50 × 30 mm en 300 dpi, avec une noirceur et une vitesse qui leur sont propres. Un **profil** enregistre ce couple — l'appareil *et* ses réglages par défaut — sous un nom.
+
+Dans l'onglet **Connexion**, champ **Profil** : choisissez un nom puis **Appliquer** pour basculer connexion et réglages d'un coup. **Enregistrer…** mémorise la connexion et les réglages affichés sous le nom saisi (réutiliser un nom existant propose de remplacer ce profil), **Supprimer** l'oublie après confirmation. Les profils sont conservés d'une session à l'autre et le dernier utilisé est pré-sélectionné au démarrage — sans être appliqué, pour ne pas modifier par surprise les réglages d'un document déjà ouvert.
+
+Ce qu'un profil transporte : mode de connexion (Bluetooth avec adresse et canal, USB ou série), format, espacement et type de support, résolution, noirceur, vitesse. Ce qu'il ne touche jamais : les éléments de l'étiquette en cours, les copies, le langage (TSPL/ZPL), le mode d'impression et l'orientation. Changer de profil revient à changer d'imprimante, pas à changer de document.
+
 ### Bluetooth (RFCOMM)
 
 1. Allumez l'imprimante, puis appairez-la **une fois** — avec le bouton *Appairer…* de l'application (plus haut) ou en ligne de commande :
@@ -215,11 +224,12 @@ open_thermal_printer/
   printer.py                connexions Bluetooth RFCOMM / USB / série, test de statut
   settings.py               réglages QSettings, reprise des réglages de l'ancien nom de l'appli
   diagnostics.py            journal d'erreurs (fichier, rotation) et crochet d'exception
+  profiles.py               profils de périphériques (imprimante + réglages par défaut), en JSON
   importer.py               PDF/image -> blocs, rognage, rendu net 203 dpi, calage des barres, transporteur, préréglages
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
   ui/error_report.py        boîte de dialogue des erreurs inattendues
-tests/                      180 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      198 tests : cœur, import, profils, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
