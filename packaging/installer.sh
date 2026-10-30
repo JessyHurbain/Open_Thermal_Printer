@@ -21,4 +21,4 @@ fi
 
 echo "✔ Open Thermal Printer ajouté au menu (entrée : $apps/open-thermal-printer.desktop)"
 echo "  Lanceur : $here/open-thermal-printer"
-echo "  Désinstaller : supprimez ces deux fichiers et le dossier du paquet."
+echo "  Désinstaller : ./desinstaller.sh, dans ce dossier."

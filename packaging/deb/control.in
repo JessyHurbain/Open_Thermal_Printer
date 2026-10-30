@@ -1,0 +1,24 @@
+Package: open-thermal-printer
+Version: @VERSION@
+Section: graphics
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: Jessy Hurbain <JessyHurbain@users.noreply.github.com>
+Homepage: https://github.com/JessyHurbain/Open_Thermal_Printer
+Depends: libc6, libgl1, libegl1, libdrm2, libwayland-client0, libwayland-cursor0,
+ libwayland-egl1, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-image0,
+ libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0,
+ libxkbcommon-x11-0, fontconfig, fonts-dejavu-core
+Recommends: bluez
+Description: conception et impression d'étiquettes thermiques (TSPL / ZPL)
+ Application de bureau pour composer des étiquettes et les imprimer sur une
+ imprimante thermique d'étiquettes, sans CUPS : Bluetooth RFCOMM, USB ou port
+ série. Éditeur visuel avec guides d'alignement et annulation, import de
+ bordereaux PDF (Vinted, Leboncoin, Mondial Relay, Colissimo…) avec rognage et
+ redressement automatiques, profils par imprimante, modes raster et natif TSPL
+ ou ZPL II.
+ .
+ L'application est autonome : Python, Qt, PDFium et les polices du rendu sont
+ embarqués dans /opt/open-thermal-printer. Les bibliothèques graphiques du
+ système restent nécessaires (celles de Qt sous X11), d'où les dépendances.

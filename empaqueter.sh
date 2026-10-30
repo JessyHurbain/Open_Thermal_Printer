@@ -41,6 +41,7 @@ mkdir -p "dist/$stage/share/icons/hicolor/256x256/apps"
 mv "dist/$name" "dist/$stage/"
 install -m 755 packaging/open-thermal-printer "dist/$stage/open-thermal-printer"
 install -m 755 packaging/installer.sh "dist/$stage/installer.sh"
+install -m 755 packaging/desinstaller.sh "dist/$stage/desinstaller.sh"
 install -m 644 packaging/open-thermal-printer.desktop.in "dist/$stage/open-thermal-printer.desktop"
 install -m 644 LICENSE README.md "dist/$stage/"
 install -m 644 docs/icons/open-thermal-printer-256.png \
@@ -51,4 +52,4 @@ tar -C dist -czf "dist/$name-$version-linux-x86_64.tar.gz" "$stage"
 rm -rf "dist/$stage" build
 
 echo "✔ dist/$name-$version-linux-x86_64.tar.gz ($(du -h "dist/$name-$version-linux-x86_64.tar.gz" | cut -f1))"
-echo "  Extraction puis ./installer.sh pour l'ajouter au menu."
+echo "  Extraction puis ./installer.sh pour l'ajouter au menu ; ./desinstaller.sh pour le retirer."

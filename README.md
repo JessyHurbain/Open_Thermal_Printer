@@ -23,7 +23,7 @@ d'import) ; rien à reconfigurer.
 - **Format** : formats prédéfinis (100×150 mm, 50×30 mm…) ou libre, en **mm ou en points**, 203/300 dpi, gap / repère noir / continu, noirceur, vitesse, copies.
 - **Langages** : TSPL (par défaut) ou ZPL II, en deux modes :
   - **Raster** (recommandé) : l'étiquette est envoyée en une image `BITMAP` → rendu identique à l'aperçu, accents et polices TrueType compris.
-  - **Natif** : `TEXT` / `BARCODE` / `QRCODE` / `BOX` (ZPL : `^A0` / `^B*` / `^BQ` / `^GB`) — très léger, mais limité aux polices internes de l'imprimante.
+  - **Natif** : `TEXT` / `BARCODE` / `QRCODE` / `BOX` (ZPL : `^A0` / `^B*` / `^BQ` / `^GB`) — très léger, mais limité aux polices internes de l'imprimante : les caractères hors CP1252 y deviennent « ? », et l'application le signale avant d'imprimer (le mode raster les conserve).
 - **Import d'étiquettes de transport (Vinted, Leboncoin…)** : ouvre un bordereau PDF ou image, détecte et rogne l'étiquette, l'ajuste au format thermique (rotation automatique, marges, seuil noir/blanc pour garder des codes-barres lisibles) et l'imprime en un clic.
 - Panneau « Commandes générées » (ce qui sera réellement envoyé), export `.tspl` / `.zpl`, export PNG, projets `.label.json` (images incluses), modèles prêts à l'emploi.
 
@@ -43,6 +43,34 @@ La [dernière release](https://github.com/JessyHurbain/Open_Thermal_Printer/rele
    L'application apparaît alors dans le menu sous « Open Thermal Printer ». L'installateur ne demande pas les droits root et se contente d'écrire deux fichiers dans `~/.local/share` (entrée de menu et icône) ; l'application reste dans son dossier, que vous pouvez déplacer en relançant `installer.sh`.
 
 > `SHA256SUMS.txt` permet de vérifier le téléchargement : `sha256sum -c SHA256SUMS.txt` dans le dossier de l'archive.
+
+### Paquet Debian / Ubuntu / Linux Mint
+
+La même release publie `open-thermal-printer_<version>_amd64.deb` :
+
+```bash
+sudo apt install ./open-thermal-printer_*.deb
+```
+
+Il installe le binaire autonome dans `/opt/open-thermal-printer`, le lanceur `open-thermal-printer`,
+l'entrée de menu et l'icône. Passez par `apt` plutôt que `dpkg -i` : les bibliothèques Qt dont
+l'application a besoin sont alors installées au passage. Le contenu est le même que celui de
+l'archive — ni Python ni `pip` ne sont nécessaires — et `./empaqueter-deb.sh` le reconstruit à
+partir de `dist/*.tar.gz`.
+
+### Désinstaller
+
+- **Archive extraite** : `./desinstaller.sh`, dans le dossier de l'application. Il retire l'entrée de
+  menu et l'icône, puis propose de supprimer le dossier lui-même et vos réglages ; `./desinstaller.sh -y`
+  fait tout sans poser de question.
+- **Paquet Debian** : `sudo apt remove open-thermal-printer`.
+- **Ce qui reste dans les deux cas** : vos réglages (`~/.config/OpenThermalPrinter` : profils,
+  connexion, code PIN, préréglages d'import) et le journal d'erreurs
+  (`~/.local/state/open-thermal-printer`). Le script de l'archive propose de les supprimer ; pour un
+  `.deb`, retirez-les à la main :
+  ```bash
+  rm -rf ~/.config/OpenThermalPrinter ~/.local/state/open-thermal-printer
+  ```
 
 <details>
 <summary>Reconstruire le paquet soi-même</summary>

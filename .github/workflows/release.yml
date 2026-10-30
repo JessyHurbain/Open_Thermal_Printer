@@ -54,6 +54,9 @@ jobs:
       - name: Construire le paquet
         run: ./empaqueter.sh
 
+      - name: Construire le paquet Debian
+        run: ./empaqueter-deb.sh
+
       - name: Vérifier que le binaire démarre sans écran
         run: |
           tar -xzf dist/OpenThermalPrinter-*-linux-x86_64.tar.gz -C /tmp
@@ -71,7 +74,7 @@ jobs:
       - name: Somme de contrôle
         run: |
           cd dist
-          sha256sum *.tar.gz > SHA256SUMS.txt
+          sha256sum *.tar.gz *.deb > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Notes de version
@@ -101,6 +104,7 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             dist/OpenThermalPrinter-*-linux-x86_64.tar.gz \
+            dist/*.deb \
             dist/SHA256SUMS.txt \
             --title "Open Thermal Printer ${GITHUB_REF_NAME#v}" \
             --notes-file release-notes.md \

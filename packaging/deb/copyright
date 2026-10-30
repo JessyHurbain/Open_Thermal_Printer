@@ -1,0 +1,65 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Open Thermal Printer
+Source: https://github.com/JessyHurbain/Open_Thermal_Printer
+
+Files: *
+Copyright: 2026 Open Thermal Printer contributors
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
+
+# Le binaire embarque ses dépendances Python. Les licences ci-dessous valent donc
+# pour le contenu du paquet, pas seulement pour le code du dépôt.
+Files: lib/python3.12/site-packages/PyQt6/*
+Copyright: 2026 Riverbank Computing Limited
+License: GPL-3.0
+Comment: PyQt6 est distribué sous GPL-3.0 (ou licence commerciale Riverbank).
+ Ce paquet embarque PyQt6 tel quel : sa redistribution relève donc du GPL-3.0,
+ alors que le code du projet est sous MIT. Le texte de la GPL-3.0 se trouve dans
+ /usr/share/common-licenses/GPL-3 et sur https://www.gnu.org/licenses/gpl-3.0.html.
+
+Files: lib/python3.12/site-packages/PIL/*
+Copyright: 2010-2026 Jeffrey A. Clark and contributors
+License: MIT-CMU
+
+Files: lib/python3.12/site-packages/pdfium*
+Copyright: 2014-2026 PDFium authors
+License: BSD-3-clause
+Comment: pypdfium2 (Apache-2.0) embarque les binaires PDFium, sous BSD-3-clause.
+
+Files: lib/python3.12/site-packages/pdfminer/*
+Copyright: 2004-2026 Yusuke Shinyama and contributors
+License: MIT
+
+Files: lib/python3.12/site-packages/qrcode/*
+Copyright: 2011-2026 Lincoln Loop and contributors
+License: BSD-3-clause
+
+Files: lib/python3.12/site-packages/barcode/*
+Copyright: 2009-2026 Hugo van Kemenade and contributors
+License: MIT
+
+Files: lib/python3.12/site-packages/serial/*
+Copyright: 2001-2026 Chris Liechti
+License: BSD-3-clause
+
+Files: lib/python3.12/site-packages/PyInstaller/*
+Copyright: 2010-2026 PyInstaller Development Team
+License: GPL-2.0-with-exception
+Comment: Le chargeur PyInstaller est sous GPL-2.0 avec une exception qui autorise
+ la redistribution du binaire produit sous une autre licence.
