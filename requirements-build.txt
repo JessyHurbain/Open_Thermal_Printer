@@ -1,0 +1,4 @@
+# Outils de construction du paquet autonome (voir empaqueter.sh), utilisés par l'intégration
+# continue lors d'une release. Version fixée : un nouveau PyInstaller peut changer les hooks
+# Qt et casser un binaire sans qu'une ligne de code ait bougé.
+pyinstaller==6.22.3

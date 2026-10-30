@@ -1,0 +1,4 @@
+#!/bin/sh
+# Lance l'application depuis le dossier extrait, quel que soit le répertoire courant.
+# `readlink -f` résout les liens : le lanceur peut être appelé depuis un raccourci.
+exec "$(dirname "$(readlink -f "$0")")/OpenThermalPrinter/OpenThermalPrinter" "$@"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Open Thermal Printer
+GenericName=Étiquettes thermiques
+Comment=Concevoir et imprimer des étiquettes thermiques (TSPL / ZPL)
+Exec=@EXEC@
+Icon=open-thermal-printer
+Terminal=false
+Categories=Office;
+Keywords=étiquette;label;imprimante;thermique;TSPL;ZPL;Vinted;
+StartupWMClass=OpenThermalPrinter

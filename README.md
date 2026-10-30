@@ -1,6 +1,9 @@
 # Open Thermal Printer
 
+<img src="docs/icons/open-thermal-printer-128.png" alt="Imprimante thermique stylisée" width="96" align="right">
+
 [![Tests](https://github.com/JessyHurbain/Open_Thermal_Printer/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/JessyHurbain/Open_Thermal_Printer/actions/workflows/tests.yml)
+[![Dernière version](https://img.shields.io/github/v/release/JessyHurbain/Open_Thermal_Printer?label=version)](https://github.com/JessyHurbain/Open_Thermal_Printer/releases/latest)
 [![Licence MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 Application de bureau (Python + PyQt6) pour concevoir et imprimer des étiquettes thermiques
@@ -24,7 +27,35 @@ d'import) ; rien à reconfigurer.
 - **Import d'étiquettes de transport (Vinted, Leboncoin…)** : ouvre un bordereau PDF ou image, détecte et rogne l'étiquette, l'ajuste au format thermique (rotation automatique, marges, seuil noir/blanc pour garder des codes-barres lisibles) et l'imprime en un clic.
 - Panneau « Commandes générées » (ce qui sera réellement envoyé), export `.tspl` / `.zpl`, export PNG, projets `.label.json` (images incluses), modèles prêts à l'emploi.
 
-## Installation (Linux Mint 21/22)
+## Télécharger (sans rien installer)
+
+La [dernière release](https://github.com/JessyHurbain/Open_Thermal_Printer/releases/latest) fournit un paquet **autonome** : aucun Python, aucun `pip`, aucune dépendance à installer sur la machine.
+
+1. Téléchargez `OpenThermalPrinter-<version>-linux-x86_64.tar.gz`.
+2. Extrayez l'archive où vous voulez la garder, par exemple :
+   ```bash
+   mkdir -p ~/Applications && tar -xzf ~/Téléchargements/OpenThermalPrinter-*.tar.gz -C ~/Applications
+   ```
+3. Ajoutez-la au menu :
+   ```bash
+   ~/Applications/open-thermal-printer-*/installer.sh
+   ```
+   L'application apparaît alors dans le menu sous « Open Thermal Printer ». L'installateur ne demande pas les droits root et se contente d'écrire deux fichiers dans `~/.local/share` (entrée de menu et icône) ; l'application reste dans son dossier, que vous pouvez déplacer en relançant `installer.sh`.
+
+> `SHA256SUMS.txt` permet de vérifier le téléchargement : `sha256sum -c SHA256SUMS.txt` dans le dossier de l'archive.
+
+<details>
+<summary>Reconstruire le paquet soi-même</summary>
+
+`./empaqueter.sh` installe PyInstaller, construit le binaire puis l'archive dans `dist/` (environ deux minutes). Le binaire embarque Qt, PDFium et les polices : c'est ce qui explique sa taille, et c'est ce qui lui permet de démarrer sur une machine vierge.
+
+Pousser un tag `v<version>` déclenche `.github/workflows/release.yml` : le paquet est construit, son démarrage vérifié sans écran, puis la release est publiée avec ses notes tirées de [CHANGELOG.md](CHANGELOG.md). Le tag doit correspondre à `__version__`, sinon la publication s'arrête.
+
+</details>
+
+## Installation depuis les sources (Linux Mint 21/22)
+
+Pour développer ou lancer la version du dépôt :
 
 ```bash
 sudo apt update
@@ -232,8 +263,14 @@ open_thermal_printer/
 tests/                      198 tests : cœur, import, profils, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
+docs/icon.svg               logo (imprimante thermique), et ses PNG 16 → 512 px
+docs/icons/                 icônes exportées depuis le SVG
+packaging/                  lanceur, entrée de menu et installateur du paquet
+empaqueter.sh               construit le paquet autonome (PyInstaller) dans dist/
+CHANGELOG.md                journal des versions, source des notes de release
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
 .github/workflows/tests.yml intégration continue : même suite à chaque push
+.github/workflows/release.yml  tag v* → paquet construit, vérifié, publié
 ```
 
 ## Dépannage

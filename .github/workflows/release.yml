@@ -1,0 +1,104 @@
+name: Release
+
+# Pousser un tag « v1.0.0 » construit le paquet Linux et publie la release.
+# Le tag doit correspondre à __version__ (open_thermal_printer/__init__.py) : une erreur
+# volontairement bloquante, pour ne jamais publier un binaire qui annonce une autre version.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Paquet Linux + release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # notes de version : historique complet
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Bibliothèques Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libfontconfig1 libxkbcommon-x11-0 libxcb-cursor0 \
+            fonts-dejavu-core
+
+      - name: Dépendances
+        run: pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Cohérence du tag avec la version du code
+        run: |
+          version=$(python -c "from open_thermal_printer import __version__; print(__version__)")
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Le tag ${GITHUB_REF_NAME} ne correspond pas à __version__ = $version"
+            exit 1
+          fi
+          echo "Version $version confirmée."
+
+      - name: Construire le paquet
+        run: ./empaqueter.sh
+
+      - name: Vérifier que le binaire démarre sans écran
+        run: |
+          tar -xzf dist/OpenThermalPrinter-*-linux-x86_64.tar.gz -C /tmp
+          set +e
+          # 124 = toujours en vie au bout du délai : la fenêtre s'est bien ouverte.
+          QT_QPA_PLATFORM=offscreen timeout 30 /tmp/open-thermal-printer-*/open-thermal-printer
+          code=$?
+          set -e
+          if [ "$code" -ne 124 ]; then
+            echo "::error::Le binaire s'est arrêté avec le code $code"
+            exit 1
+          fi
+          echo "Le binaire démarre."
+
+      - name: Somme de contrôle
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Notes de version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Section « ## <version> » de CHANGELOG.md, sans son titre.
+          awk -v v="$version" '
+            $0 ~ "^## " v "($|[^0-9])" { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "Pas de section $version dans CHANGELOG.md : notes générées depuis l'historique."
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${GITHUB_REF_NAME}" --jq .body > release-notes.md
+            printf '\n### Paquet Linux\n\n`OpenThermalPrinter-%s-linux-x86_64.tar.gz` : aucun Python à installer, extrayez l'archive puis lancez `./installer.sh`.\n' \
+              "$version" >> release-notes.md
+          fi
+          cat release-notes.md
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/OpenThermalPrinter-*-linux-x86_64.tar.gz \
+            dist/SHA256SUMS.txt \
+            --title "Open Thermal Printer ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md \
+            --verify-tag
