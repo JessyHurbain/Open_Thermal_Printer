@@ -1,5 +1,8 @@
 # Open Thermal Printer
 
+[![Tests](https://github.com/JessyHurbain/Open_Thermal_Printer/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/JessyHurbain/Open_Thermal_Printer/actions/workflows/tests.yml)
+[![Licence MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
 Application de bureau (Python + PyQt6) pour concevoir et imprimer des étiquettes thermiques
 sous **Linux**, en TSPL (ou ZPL), **sans CUPS**. Réglée et vérifiée sur une **Phomemo PM-241-BT**,
 elle pilote aussi les autres imprimantes d'étiquettes qui parlent ces deux langages.
