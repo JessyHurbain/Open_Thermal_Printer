@@ -38,6 +38,63 @@ def two_panel_page(size=(1700, 1240)) -> Image.Image:
     return img
 
 
+class PdfPage:
+    """Page d'un PDF fabriqué par les tests — coordonnées en points, origine en haut à gauche."""
+
+    def __init__(self, width: float = 595, height: float = 842, rotation: int = 0):
+        self.width, self.height, self.rotation = width, height, rotation
+        self.ops: list[str] = []
+
+    def rect(self, x0: float, y0: float, x1: float, y1: float, fill: bool = True, thickness: float = 1.0) -> None:
+        """Rectangle plein, ou cadre si `fill` est faux."""
+        y = self.height - y1  # PDF : origine en bas à gauche
+        if fill:
+            self.ops.append(f"0 0 0 rg {x0} {y} {x1 - x0} {y1 - y0} re f")
+        else:
+            self.ops.append(f"0 G {thickness} w {x0} {y} {x1 - x0} {y1 - y0} re S")
+
+    def text(self, x: float, y: float, content: str, size: float = 14, rotation: int = 0) -> None:
+        """Texte de `size` points, tourné de 0/90/180/270°, dont le point d'attache est (x, y)."""
+        a, b, c, d = {0: (1, 0, 0, 1), 90: (0, 1, -1, 0), 180: (-1, 0, 0, -1), 270: (0, -1, 1, 0)}[rotation % 360]
+        escaped = content.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+        self.ops.append(f"BT /F1 {size} Tf {a} {b} {c} {d} {x} {self.height - y} Tm ({escaped}) Tj ET")
+
+    def content(self) -> str:
+        return "\n".join(self.ops)
+
+
+def write_pdf(path: str, pages: list[PdfPage]) -> None:
+    """Écrit un PDF minimal, sans dépendance : l'import se teste sans PyMuPDF ni reportlab."""
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"",  # arbre des pages, rempli quand le nombre de pages est connu
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+    kids: list[bytes] = []
+    for i, page in enumerate(pages):
+        kids.append(b"%d 0 R" % (4 + 2 * i))
+        data = page.content().encode("latin-1")
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %s %s] /Rotate %d "
+            b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>"
+            % (str(page.width).encode(), str(page.height).encode(), page.rotation, 5 + 2 * i))
+        objects.append(b"<< /Length %d >>\nstream\n" % len(data) + data + b"\nendstream")
+    objects[1] = b"<< /Type /Pages /Kids [" + b" ".join(kids) + b"] /Count %d >>" % len(pages)
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    with open(path, "wb") as fh:
+        fh.write(out)
+
+
 class BlockTests(unittest.TestCase):
     def test_largest_block_is_the_label(self):
         img = page_with_label()
@@ -154,18 +211,14 @@ class SourceTests(unittest.TestCase):
             self.assertEqual(src.render().size, (1240, 1754))
 
     def test_pdf_source_multipage(self):
-        try:
-            import pymupdf
-        except ImportError:
-            self.skipTest("PyMuPDF absent")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "e.pdf")
-            doc = pymupdf.open()
+            pages = []
             for _ in range(2):
-                page = doc.new_page(width=595, height=842)
-                page.draw_rect(pymupdf.Rect(50, 50, 300, 400), width=2)
-            doc.save(path)
-            doc.close()
+                page = PdfPage()
+                page.rect(50, 50, 300, 400, fill=False, thickness=2)
+                pages.append(page)
+            write_pdf(path, pages)
             src = importer.PageSource(path)
             self.assertEqual(src.page_count, 2)
             img = src.render(1, dpi=150)
@@ -173,53 +226,57 @@ class SourceTests(unittest.TestCase):
             self.assertIsNotNone(importer.content_bbox(img))
             src.close()
 
+    def test_rotated_page_text_follows_the_display(self):
+        """Une page /Rotate 90 est affichée tournée : les rectangles de texte doivent suivre."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rot.pdf")
+            page = PdfPage(rotation=90)
+            page.text(60, 100, "BORDEREAU", size=14)
+            write_pdf(path, [page])
+            src = importer.PageSource(path)
+            img = src.render(0, importer.PREVIEW_DPI)
+            self.assertGreater(img.width, img.height)  # page portrait affichée en paysage
+            ink = importer.content_bbox(img)
+            self.assertIsNotNone(ink)
+            blocks = src.text_blocks(0)
+            self.assertEqual(len(blocks), 1)
+            text, (x0, y0, _x1, _y1) = blocks[0]
+            self.assertIn("BORDEREAU", text)
+            # le rectangle du texte tombe sur l'encre réellement dessinée (tolérance : 2,5 mm)
+            self.assertLessEqual(abs(x0 - ink[0]), 30)
+            self.assertLessEqual(abs(y0 - ink[1]), 30)
+            src.close()
+
     def test_rotation_is_measured_inside_the_label_only(self):
         """Le mode d'emploi de la page est droit : il ne doit pas masquer l'étiquette tournée."""
-        try:
-            import pymupdf
-        except ImportError:
-            self.skipTest("PyMuPDF absent")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "r.pdf")
-            doc = pymupdf.open()
-            page = doc.new_page(width=595, height=842)
-            page.insert_text((40, 60), "Mode d'emploi de l'etiquette " * 12, fontsize=11)
-            page.insert_text((420, 760), "LU / R09 24R RECEIVER", fontsize=16, rotate=90)
-            doc.save(path)
+            page = PdfPage()
+            page.text(40, 60, "Mode d'emploi de l'etiquette " * 12, size=11)
+            page.text(420, 760, "LU / R09 24R RECEIVER", size=16, rotation=90)
+            write_pdf(path, [page])
             src = importer.PageSource(path)
             k = importer.PREVIEW_DPI / 72
             label_rect = (int(300 * k), int(200 * k), int(595 * k), int(842 * k))
             self.assertEqual(src.text_rotation(0), 0)  # toute la page : les instructions gagnent
             self.assertEqual(src.text_rotation(0, label_rect), 90)  # l'étiquette, elle, est couchée
-            doc.close()
+            src.close()
 
     def test_rotation_is_zero_when_the_page_has_no_text(self):
-        try:
-            import pymupdf
-        except ImportError:
-            self.skipTest("PyMuPDF absent")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "vide.pdf")
-            doc = pymupdf.open()
-            doc.new_page(width=595, height=842)
-            doc.save(path)
+            write_pdf(path, [PdfPage()])
             src = importer.PageSource(path)
             self.assertEqual(src.text_rotation(), 0)
-            doc.close()
+            src.close()
 
     def test_placement_adds_the_orientation_fix(self):
         """La correction d'orientation s'ajoute à la rotation demandée par l'utilisateur."""
-        try:
-            import pymupdf
-        except ImportError:
-            self.skipTest("PyMuPDF absent")
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "e.pdf")
-            doc = pymupdf.open()
-            page = doc.new_page(width=595, height=842)
-            page.insert_text((60, 100), "Bordereau", fontsize=14)
-            doc.save(path)
-            doc.close()
+            page = PdfPage()
+            page.text(60, 100, "Bordereau", size=14)
+            write_pdf(path, [page])
             src = importer.PageSource(path)
             page_img = src.render(0, importer.PREVIEW_DPI)
             rect = importer.auto_crop(page_img, src.text_blocks(0))
@@ -247,21 +304,20 @@ class SourceTests(unittest.TestCase):
 
 def vector_barcode_pdf(path, module_mm=0.33, text="MONDIAL RELAY Vinted", pages=1):
     """PDF A4 avec un cadre d'étiquette, du texte et un Code 128 vectoriel (barres exactes)."""
-    import pymupdf
     from open_thermal_printer.renderer import barcode_modules
 
     bits, _ = barcode_modules("code128", "MR0123456789")
-    doc = pymupdf.open()
     mod = module_mm * 72 / 25.4
+    sheets = []
     for _ in range(pages):
-        page = doc.new_page(width=595, height=842)
-        page.draw_rect(pymupdf.Rect(40, 40, 300, 300), width=1)
-        page.insert_text((60, 100), text, fontsize=14)
-        for i, b in enumerate(bits):
-            if b == "1":
-                page.draw_rect(pymupdf.Rect(60 + i * mod, 120, 60 + (i + 1) * mod, 200), fill=(0, 0, 0), color=None)
-    doc.save(path)
-    doc.close()
+        page = PdfPage()
+        page.rect(40, 40, 300, 300, fill=False)
+        page.text(60, 100, text, size=14)
+        for i, bit in enumerate(bits):
+            if bit == "1":
+                page.rect(60 + i * mod, 120, 60 + (i + 1) * mod, 200, fill=True)
+        sheets.append(page)
+    write_pdf(path, sheets)
 
 
 class ModuleSnapTests(unittest.TestCase):

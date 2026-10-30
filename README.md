@@ -102,7 +102,7 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 ## Tester
 
 ```bash
-./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 179 tests
+./tester.sh                 # crée le venv au besoin, installe les dépendances et lance les 180 tests
 ./tester.sh tests.test_ui   # seulement ces modules
 ./tester.sh -p test_ui.py   # seulement les fichiers correspondant au motif
 ```
@@ -212,7 +212,7 @@ open_thermal_printer/
   templates.py              modèles d'étiquettes
   ui/                       canvas, panneaux Étiquette / Élément / Connexion, fenêtre principale
   ui/error_report.py        boîte de dialogue des erreurs inattendues
-tests/                      179 tests : cœur, import, et interface hors écran (./tester.sh)
+tests/                      180 tests : cœur, import, et interface hors écran (./tester.sh)
 captures.sh                 régénère les captures du README
 outils/captures.py          captures Qt hors écran, données fictives
 .githooks/pre-commit        hook Git : lance les tests avant chaque commit
@@ -246,4 +246,8 @@ Les messages du panneau *Journal* sont recopiés dans `~/.local/state/open-therm
 
 MIT — voir [LICENSE](LICENSE). Utilisation, modification et redistribution libres, y compris commerciales, à condition de conserver la mention de copyright et l'avis de licence.
 
-⚠️ Une dépendance n'est pas sous MIT : l'import de PDF s'appuie sur **PyMuPDF**, distribué sous **AGPL-3.0**. Le code du projet reste MIT, mais si vous redistribuez une version qui embarque PyMuPDF (binaire, paquet, image Docker), c'est l'AGPL qui s'applique à l'ensemble et vous devez en fournir les sources. Pour un usage personnel ou interne, aucune conséquence.
+Les dépendances hors interface sont toutes permissives, donc sans conflit avec le MIT : Pillow (MIT-CMU), qrcode (BSD), python-barcode (MIT), pyserial (BSD), pypdfium2 (Apache-2.0, binaires PDFium en BSD-3), pdfminer.six (MIT).
+
+L'import de PDF s'appuyait sur **PyMuPDF**, sous **AGPL-3.0** : distribuer l'application l'aurait placée tout entière sous cette licence. Le rendu passe désormais par **pypdfium2** et la lecture du texte par **pdfminer.six**, tous deux permissifs.
+
+⚠️ Reste un point, antérieur à ce choix : l'interface repose sur **PyQt6**, sous **GPL-3.0** (ou licence commerciale Riverbank). Le code du projet est MIT, mais un binaire ou un paquet qui embarque PyQt6 doit respecter le GPL, donc publier ses sources — sauf licence commerciale. Pour un usage personnel, interne ou pour un logiciel déjà publié sous GPL, aucune conséquence. Passer à PySide6 (LGPL) lèverait cette contrainte, au prix d'une migration de l'interface.

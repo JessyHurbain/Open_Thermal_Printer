@@ -2,7 +2,7 @@
 
 Les bordereaux Vinted (Mondial Relay, Colissimo, Chronopost…) et Leboncoin sont des PDF A4 où
 l'étiquette n'occupe qu'une partie de la page, entourée d'instructions. Ce module :
-  1. rasterise la page (PyMuPDF) ou charge l'image ;
+  1. rasterise la page (pypdfium2) ou charge l'image ;
   2. repère les « blocs » de contenu séparés par du blanc (l'étiquette en fait partie) ;
   3. rogne, tourne si besoin et ajuste le résultat au format de l'étiquette thermique.
 
@@ -16,7 +16,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import groupby
 
 from PIL import Image
@@ -35,26 +35,80 @@ class ImportError_(Exception):
 
 
 # ---------------------------------------------------------------- chargement
+def _display_rect(bbox: tuple[float, float, float, float], height: float, scale: float) -> Rect:
+    """Rectangle pdfminer -> pixels de la page affichée, même repère que `render()`.
+
+    pdfminer fournit des points d'origine **bas-gauche** et applique déjà le /Rotate de la page
+    (sa page est retournée en paysage) : il ne reste qu'à retourner l'axe vertical.
+    """
+    x0, y0, x1, y1 = bbox
+    return int(x0 * scale), int((height - y1) * scale), int(x1 * scale), int((height - y0) * scale)
+
+
+def _collect_page_text(layout, found: _PageText, scale: float) -> None:
+    """Remplit `found` en parcourant l'arbre d'une page pdfminer (blocs, lignes, sens d'écriture)."""
+    from pdfminer.layout import LTChar, LTTextBox, LTTextLine
+
+    height = layout.height
+
+    def walk(obj) -> None:
+        if isinstance(obj, LTTextBox):
+            text = obj.get_text()
+            if text.strip():
+                found.blocks.append((text, _display_rect(obj.bbox, height, scale)))
+        elif isinstance(obj, LTTextLine):
+            chars = [c for c in obj if isinstance(c, LTChar)]
+            text = "".join(c.get_text() for c in chars).strip()
+            if text:
+                a, b = chars[0].matrix[:2]  # vecteur d'écriture (axe y vers le haut)
+                # l'écran a l'axe y vers le bas : la rotation qui redresse vaut directement le
+                # quart de tour mesuré ici
+                quarter = int(round(math.degrees(math.atan2(b, a)) / 90)) % 4
+                found.lines.append((text, _display_rect(obj.bbox, height, scale), quarter))
+        for child in getattr(obj, "_objs", ()):  # LTTextBox -> LTTextLine -> LTChar
+            walk(child)
+
+    walk(layout)
+
+
+@dataclass
+class _PageText:
+    """Texte d'une page : contenu brut, blocs, et lignes avec le sens d'écriture.
+
+    `lines` mémorise déjà la rotation qui redresse la ligne, en quarts de tour horaires.
+    """
+
+    text: str = ""
+    blocks: list[tuple[str, Rect]] = field(default_factory=list)
+    lines: list[tuple[str, Rect, int]] = field(default_factory=list)
+
+
 class PageSource:
-    """Document source : PDF multi-pages ou image unique."""
+    """Document source : PDF multi-pages ou image unique.
+
+    Deux bibliothèques sous licence permissive se partagent le travail : **pypdfium2** (Apache-2.0)
+    rasterise, **pdfminer.six** (MIT) lit le texte et le sens d'écriture. PyMuPDF, sous AGPL-3.0,
+    a été écarté pour que le projet puisse être distribué sous MIT.
+    """
 
     def __init__(self, path: str):
         self.path = path
         self._doc = None
         self._image: Image.Image | None = None
+        self._texts: dict[int, _PageText] = {}
         low = path.lower()
         if low.endswith(PDF_EXTS):
             try:
-                import pymupdf  # PyMuPDF >= 1.24
+                import pypdfium2
             except ImportError as exc:
-                raise ImportError_("PyMuPDF n'est pas installé :  pip install pymupdf") from exc
+                raise ImportError_("pypdfium2 n'est pas installé :  pip install pypdfium2") from exc
             try:
-                self._doc = pymupdf.open(path)
+                self._doc = pypdfium2.PdfDocument(path)
             except Exception as exc:
+                if "password" in str(exc).lower():
+                    raise ImportError_("Ce PDF est protégé par un mot de passe.") from exc
                 raise ImportError_(f"PDF illisible : {exc}") from exc
-            if self._doc.needs_pass:
-                raise ImportError_("Ce PDF est protégé par un mot de passe.")
-            if self._doc.page_count == 0:
+            if len(self._doc) == 0:
                 raise ImportError_("Ce PDF ne contient aucune page.")
         elif low.endswith(IMAGE_EXTS):
             try:
@@ -68,46 +122,59 @@ class PageSource:
 
     @property
     def page_count(self) -> int:
-        return self._doc.page_count if self._doc else 1
+        return len(self._doc) if self._doc else 1
+
+    def _page_object(self, page: int):
+        """Page pdfium demandée, bornée à celles du document."""
+        assert self._doc is not None  # sans image, le document PDF est ouvert
+        return self._doc[max(0, min(page, self.page_count - 1))]
 
     def render(self, page: int = 0, dpi: int = 300) -> Image.Image:
         """Page rasterisée en RGB (les images sont renvoyées telles quelles)."""
         if self._image is not None:
             return self._image.copy()
-        assert self._doc is not None  # sans image, le document PDF est ouvert
-        pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(dpi=dpi, alpha=False)
-        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        bitmap = self._page_object(page).render(scale=dpi / 72)
+        try:
+            return bitmap.to_pil().convert("RGB").copy()
+        finally:
+            bitmap.close()
 
     @property
     def is_pdf(self) -> bool:
         return self._doc is not None
 
+    def _read_text(self, page: int) -> _PageText:
+        """Texte d'une page, lu une seule fois (pdfminer.six), vide pour une image."""
+        index = max(0, min(page, self.page_count - 1))
+        if index in self._texts:
+            return self._texts[index]
+        found = _PageText()
+        self._texts[index] = found  # posé d'abord : un PDF exotique laisse une page vide, sans erreur
+        if not self._doc:
+            return found
+        try:
+            from pdfminer.high_level import extract_pages
+            from pdfminer.layout import LAParams
+        except ImportError:
+            return found
+        # detect_vertical : un texte couché reste *une* ligne (sinon pdfminer en fait un caractère
+        # par ligne, ce qui hacherait les blocs et fausserait la détection de notice)
+        laparams = LAParams(detect_vertical=True)
+        try:
+            for layout in extract_pages(self.path, page_numbers=[index], laparams=laparams):
+                _collect_page_text(layout, found, PREVIEW_DPI / 72)  # points -> pixels affichés
+                found.text = "\n".join(text for text, _ in found.blocks)
+        except Exception:
+            pass  # PDF peu standard : on garde ce qui a pu être lu
+        return found
+
     def page_text(self, page: int = 0) -> str:
         """Texte du PDF (vide pour une image : pas d'OCR)."""
-        if not self._doc:
-            return ""
-        try:
-            return self._doc[max(0, min(page, self.page_count - 1))].get_text()
-        except Exception:
-            return ""
+        return self._read_text(page).text
 
     def text_blocks(self, page: int = 0) -> list[tuple[str, Rect]]:
         """Blocs de texte du PDF : (texte, rectangle) en repère PREVIEW_DPI ; vide pour une image."""
-        if not self._doc:
-            return []
-        k = PREVIEW_DPI / 72  # points PDF -> pixels de la page affichée
-        try:
-            raw = self._doc[max(0, min(page, self.page_count - 1))].get_text("blocks")
-        except Exception:
-            return []
-        found = []
-        for block in raw:
-            x0, y0, x1, y1, text = block[:5]
-            if len(block) > 6 and block[6] != 0:  # 1 = image
-                continue
-            if text.strip():
-                found.append((text, (int(x0 * k), int(y0 * k), int(x1 * k), int(y1 * k))))
-        return found
+        return self._read_text(page).blocks
 
     def text_rotation(self, page: int = 0, rect: Rect | None = None) -> int:
         """Rotation horaire (0, 90, 180, 270) qui redresse le contenu du PDF.
@@ -120,31 +187,16 @@ class PageSource:
         `rect` restreint la mesure à une zone (repère PREVIEW_DPI) : sur une page A4, les
         instructions sont droites et masqueraient l'orientation de l'étiquette elle-même.
         """
-        if not self._doc:
-            return 0
-        try:
-            raw = self._doc[max(0, min(page, self.page_count - 1))].get_text("dict")
-        except Exception:
-            return 0
-        k = PREVIEW_DPI / 72
-        weight: Counter[int] = Counter()  # quarts de tour horaires du contenu, pondérés par le texte
-        for block in raw.get("blocks", []):
-            for line in block.get("lines", []):
-                chars = len("".join(span.get("text", "") for span in line.get("spans", [])).strip())
-                if not chars:
-                    continue
-                if rect is not None:
-                    x0, y0, x1, y1 = (line.get("bbox") or block.get("bbox") or (0, 0, 0, 0))
-                    cx, cy = (x0 + x1) / 2 * k, (y0 + y1) / 2 * k
-                    if not (rect[0] <= cx <= rect[2] and rect[1] <= cy <= rect[3]):
-                        continue  # texte hors de la zone rognée (mode d'emploi de la page)
-                dx, dy = line.get("dir", (1, 0))
-                quarter = int(round(math.degrees(math.atan2(dy, dx)) / 90)) % 4
-                weight[quarter] += chars
+        weight: Counter[int] = Counter()  # quarts de tour horaires nécessaires, pondérés par le texte
+        for text, box, quarter in self._read_text(page).lines:
+            if rect is not None:
+                cx, cy = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+                if not (rect[0] <= cx <= rect[2] and rect[1] <= cy <= rect[3]):
+                    continue  # texte hors de la zone rognée (mode d'emploi de la page)
+            weight[quarter] += len(text)
         if not weight:
             return 0
-        content = weight.most_common(1)[0][0]  # orientation du contenu : 0 = déjà droit
-        return (4 - content) % 4 * 90  # rotation qui le redresse
+        return weight.most_common(1)[0][0] * 90  # rotation qui redresse le contenu majoritaire
 
     def render_region(self, page: int, rect: Rect, dpi: float) -> Image.Image:
         """Région `rect` (repère PREVIEW_DPI) rendue *directement* à `dpi` : net, sans double rééchantillonnage.
@@ -153,20 +205,22 @@ class PageSource:
         """
         if self._image is not None:
             return self._image.crop(rect)
-        import pymupdf  # déjà chargé si le PDF a été ouvert
-
-        k = 72 / PREVIEW_DPI
-        clip = pymupdf.Rect(rect[0] * k, rect[1] * k, rect[2] * k, rect[3] * k)
-        zoom = dpi / 72  # une matrice accepte un facteur décimal (le paramètre `dpi` exige un entier)
-        assert self._doc is not None
-        pix = self._doc[max(0, min(page, self.page_count - 1))].get_pixmap(
-            matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False)
-        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        pg = self._page_object(page)
+        width, height = pg.get_size()  # taille *affichée* : /Rotate compris
+        k = 72 / PREVIEW_DPI  # pixel (repère PREVIEW_DPI) -> point
+        # PDFium attend des marges à retirer (gauche, bas, droite, haut), pas une boîte englobante.
+        crop = (rect[0] * k, height - rect[3] * k, width - rect[2] * k, rect[1] * k)
+        bitmap = pg.render(scale=dpi / 72, crop=crop)
+        try:
+            return bitmap.to_pil().convert("RGB").copy()
+        finally:
+            bitmap.close()
 
     def close(self) -> None:
         if self._doc:
             self._doc.close()
             self._doc = None
+        self._texts.clear()
 
 
 def _to_rgb(im: Image.Image) -> Image.Image:
@@ -346,7 +400,10 @@ def estimate_module_px(img: Image.Image, max_run: int = 80, min_runs: int = 30) 
         if sum(counts.values()) < min_runs:
             continue
         smooth = {n: counts[n - 1] + counts[n] + counts[n + 1] for n in range(2, max_run + 1)}
-        width = max(smooth, key=lambda n: smooth[n])
+        # Le rendu d'une barre à cheval sur deux pixels ne fait qu'élargir le segment mesuré, jamais
+        # le rétrécir : à nombre de segments comparable, la largeur la plus fine est la vraie.
+        peak = max(smooth.values())
+        width = min(n for n, v in smooth.items() if v >= 0.9 * peak)
         if best is None or smooth[width] > best[0]:
             best = (smooth[width], width)
     return float(best[1]) if best else None

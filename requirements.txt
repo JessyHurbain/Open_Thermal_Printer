@@ -3,4 +3,7 @@ Pillow>=10.1
 qrcode>=7.4
 python-barcode>=0.15
 pyserial>=3.5
-pymupdf>=1.24
+# Import PDF : rendu (pypdfium2, Apache-2.0) et texte/orientation (pdfminer.six, MIT).
+# PyMuPDF a été écarté : sa licence AGPL-3.0 contaminait la redistribution du projet.
+pypdfium2>=4.30
+pdfminer.six>=20231228
