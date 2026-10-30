@@ -38,6 +38,7 @@ class Rendered:
     uh: int
     native: dict = field(default_factory=dict)  # paramètres pour les commandes natives
     error: str | None = None  # si renseigné : élément non imprimable (placeholder dessiné)
+    warning: str | None = None  # imprimable, mais dégradé (caractères perdus en mode natif)
 
 
 # ------------------------------------------------------------------ géométrie
@@ -126,7 +127,11 @@ def _render_text(el: Element, s: LabelSettings, native: bool) -> tuple[Image.Ima
         fw, fh = NATIVE_FONTS[font_id]
         cw, ch = fw * mult, fh * mult
         pitch = ch + 2 * mult
-        lines = [_safe_cp1252(line) for line in lines]
+        # Les polices internes ne connaissent que le CP1252 : un caractère absent sort en « ? ».
+        # Mieux vaut le signaler avant impression que de le laisser disparaître en silence.
+        original = lines
+        lines = [_safe_cp1252(line) for line in original]
+        lost = any(converted != source for converted, source in zip(lines, original, strict=True))
         total_w = max(1, max(len(line) for line in lines) * cw)
         total_h = pitch * len(lines) - 2 * mult
         img = Image.new("L", (total_w, total_h), 255)
@@ -144,7 +149,7 @@ def _render_text(el: Element, s: LabelSettings, native: bool) -> tuple[Image.Ima
             if bbox:  # recadre l'encre puis étire à la grille de la police imprimante
                 glyphs = natural.crop((0, 0, bbox[2], int(ch * 1.2))).resize((lw, ch), Image.Resampling.BOX)
                 img.paste(glyphs.point(lambda v: 0 if v < 160 else 255), (dx, dy))
-        info = {"font": font_id, "mult": mult, "lines": placed}
+        info = {"font": font_id, "mult": mult, "lines": placed, "lost_chars": lost}
         return img, info
 
     font = load_font(el.font_family, el.bold, el.italic, s.to_dots(el.font_size))
@@ -272,7 +277,11 @@ def render_element(el: Element, s: LabelSettings, native: bool = False) -> Rende
         img = _error_box(error[:24], s)
     uw, uh = img.size
     img = rotate_cw(img, el.rotation)
-    return Rendered(el, img, s.to_dots(el.x), s.to_dots(el.y), uw, uh, info, error)
+    warning = None
+    if info.get("lost_chars"):
+        warning = "caractères hors CP1252 remplacés par « ? » (le mode raster les conserve)"
+    return Rendered(el, img, s.to_dots(el.x), s.to_dots(el.y), uw, uh,
+                    native=info, error=error, warning=warning)
 
 
 def render_label(label: Label) -> tuple[Image.Image, list[Rendered]]:
@@ -290,3 +299,8 @@ def render_label(label: Label) -> tuple[Image.Image, list[Rendered]]:
 
 def warnings_for(rendered: list[Rendered]) -> list[str]:
     return [f"{r.el.display_name()} : {r.error}" for r in rendered if r.error]
+
+
+def degraded_for(rendered: list[Rendered]) -> list[str]:
+    """Éléments qui s'imprimeront, mais amputés : caractères que la police interne ne sait pas écrire."""
+    return [f"{r.el.display_name()} : {r.warning}" for r in rendered if r.warning]

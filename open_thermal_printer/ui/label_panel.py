@@ -155,10 +155,22 @@ class LabelPanel(QWidget):
         if self._loading:
             return
         s = self.settings
-        s.dpi = self.dpi.currentData()  # avant la taille : le facteur « points » en dépend
-        f = self._factor()
-        s.width_mm = round(self.width.value() / f, 2)
-        s.height_mm = round(self.height.value() / f, 2)
+        new_dpi = self.dpi.currentData()
+        dpi_changed = s.dpi != new_dpi
+        s.dpi = new_dpi  # avant la taille : le facteur « points » en dépend
+        if dpi_changed:
+            # Changer de résolution ne change pas la taille physique. Les champs « points »
+            # affichent encore l'ancien facteur : on les réaffiche, et on garde les millimètres
+            # tels quels plutôt que de diviser un nombre de points périmé par le nouveau facteur.
+            self._loading = True
+            self._show_size()
+            self._loading = False
+            width_mm, height_mm = s.width_mm, s.height_mm
+        else:
+            f = self._factor()
+            width_mm = round(self.width.value() / f, 2)
+            height_mm = round(self.height.value() / f, 2)
+        s.width_mm, s.height_mm = width_mm, height_mm
         s.media = self.media.currentData()
         s.gap_mm = self.gap.value()
         s.density, s.speed = self.density.value(), self.speed.value()

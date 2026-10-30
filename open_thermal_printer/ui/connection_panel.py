@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 from .. import printer, profiles
 from ..profiles import PrinterProfile
 from ..settings import settings as app_settings
+from .workers import Worker
 
 
 class ConnectionPanel(QWidget):
@@ -151,7 +152,11 @@ class ConnectionPanel(QWidget):
 
         self._restore()
         self._load_profiles()
-        self.refresh_devices()
+        self._refresh_ports()  # glob sur /dev : instantané, aucune attente
+        # bluetoothctl peut mettre plusieurs secondes à répondre (trois commandes, 5 s chacune
+        # au pire) : sa lecture passe par un thread, après l'affichage de la fenêtre.
+        self._paired_worker: Worker | None = None
+        QTimer.singleShot(0, self.refresh_bluetooth_async)
 
     # ------------------------------------------------------------ état
     def set_busy(self, busy: bool) -> None:
@@ -269,7 +274,7 @@ class ConnectionPanel(QWidget):
             self.kind.setCurrentIndex(index)
             self.stack.setCurrentIndex(index)
         if profile.kind == "bluetooth":
-            self.refresh_devices()  # l'appareil doit figurer dans la liste s'il est appairé
+            self.refresh_bluetooth_async()  # l'appareil figurera dans la liste s'il est appairé
             self.mac.setText(profile.mac)
             self.channel.setValue(profile.channel)
             position = self.paired.findData(profile.mac)
@@ -288,9 +293,37 @@ class ConnectionPanel(QWidget):
         self.save()
 
     def refresh_devices(self) -> None:
+        """Relit les appareils appairés et les ports locaux (bloquant, pour une action explicite)."""
+        self._fill_paired(printer.list_paired_devices())
+        self._refresh_ports()
+
+    def refresh_bluetooth_async(self) -> None:
+        """Liste Bluetooth hors du thread de l'interface (démarrage, application d'un profil)."""
+        worker = self._paired_worker
+        if worker is not None and worker.isRunning():
+            return  # une lecture est déjà en cours : inutile d'en lancer une seconde
+        worker = Worker(lambda _progress: printer.list_paired_devices(), self)
+        worker.succeeded.connect(self._fill_paired)
+        worker.finished.connect(self._paired_listed)
+        self._paired_worker = worker
+        worker.start()
+
+    def _paired_listed(self) -> None:
+        worker, self._paired_worker = self._paired_worker, None
+        if worker is not None:
+            worker.deleteLater()  # sans cela, un QThread s'accumule à chaque lecture
+
+    def wait_for_background(self, timeout: int = 4000) -> None:
+        """Attend la lecture Bluetooth en cours : un QThread ne doit pas être détruit en marche."""
+        worker = self._paired_worker
+        if worker is not None and worker.isRunning():
+            worker.wait(timeout)
+
+    def _fill_paired(self, devices: list[tuple[str, str]]) -> None:
+        """Remplit la liste des appareils appairés, en préservant la sélection courante."""
         current = self.paired.currentData()
+        self.paired.blockSignals(True)
         self.paired.clear()
-        devices = printer.list_paired_devices()
         for mac, name in devices:
             self.paired.addItem(f"{name}  ({mac})", mac)
         if not devices:
@@ -303,7 +336,10 @@ class ConnectionPanel(QWidget):
                     self._pick_paired(i)
         if current:
             self.paired.setCurrentIndex(max(0, self.paired.findData(current)))
+        self.paired.blockSignals(False)
 
+    def _refresh_ports(self) -> None:
+        """Ports USB et série proposés : une simple lecture de /dev, sans attente."""
         for combo, paths, default in ((self.usb_path, printer.list_usb_devices(), "/dev/usb/lp0"),
                                        (self.ser_path, printer.list_serial_ports(), "/dev/ttyUSB0")):
             text = combo.currentText()
@@ -339,7 +375,7 @@ class ConnectionPanel(QWidget):
         """Bascule la connexion sur ce périphérique Bluetooth (après un appairage)."""
         self.kind.setCurrentIndex(max(0, self.kind.findData("bluetooth")))
         self.stack.setCurrentIndex(self.kind.currentIndex())
-        self.refresh_devices()
+        self.refresh_bluetooth_async()
         self.mac.setText(mac)
         position = self.paired.findData(mac)
         if position >= 0:

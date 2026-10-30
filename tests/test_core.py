@@ -20,7 +20,9 @@ from open_thermal_printer import diagnostics, printer, profiles, templates
 from open_thermal_printer.history import History
 from open_thermal_printer.imaging import invert_bytes, pack_bitmap, to_bilevel
 from open_thermal_printer.models import KIND_ICONS, KIND_LABELS, Element, Label, LabelSettings
-from open_thermal_printer.renderer import printer_anchor, render_element, render_label, warnings_for
+from open_thermal_printer.renderer import (
+    degraded_for, printer_anchor, render_element, render_label, warnings_for,
+)
 from open_thermal_printer.tspl import build_tspl
 from open_thermal_printer.zpl import build_zpl
 
@@ -160,6 +162,19 @@ class RenderTests(unittest.TestCase):
     def test_missing_image_flagged(self):
         r = render_element(Element("image", image_b64=""), LabelSettings())
         self.assertEqual(r.error, "Image manquante")
+
+    def test_native_mode_flags_characters_outside_cp1252(self):
+        # La police interne ne sait écrire que le CP1252 : le texte doit être signalé, pas ignoré.
+        _, rendered = render_label(one(Element("text", text="Étiquette → 日本"), mode="native"))
+        self.assertIsNone(rendered[0].error)
+        self.assertIsNotNone(rendered[0].warning)
+        self.assertTrue(degraded_for(rendered))
+
+    def test_raster_mode_keeps_every_character_without_warning(self):
+        # Le mode raster envoie une image : aucun caractère ne peut y être perdu.
+        _, rendered = render_label(one(Element("text", text="Étiquette → 日本"), mode="raster"))
+        self.assertIsNone(rendered[0].warning)
+        self.assertEqual(degraded_for(rendered), [])
 
 
 class TsplTests(unittest.TestCase):

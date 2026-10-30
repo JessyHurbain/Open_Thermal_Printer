@@ -27,7 +27,7 @@ from ..history import History
 from .element_list import DETAIL_ROLE, ICON_ROLE, ElementItemDelegate
 from ..imaging import encode_image_file
 from ..models import KIND_ICONS, KIND_LABELS, Element, Label
-from ..renderer import render_element, render_label, warnings_for
+from ..renderer import degraded_for, render_element, render_label, warnings_for
 from ..tspl import build_tspl
 from ..zpl import build_zpl
 from .canvas import LabelCanvas
@@ -713,6 +713,7 @@ class MainWindow(QMainWindow):
             self._probe_timer.stop()
             if self._probe and self._probe.isRunning():
                 self._probe.wait(4000)  # laisse la vérification en cours se terminer
+            self.conn_panel.wait_for_background()  # idem pour la lecture Bluetooth de démarrage
             self._close_probe_session()
             event.accept()
         else:
@@ -783,12 +784,21 @@ class MainWindow(QMainWindow):
     def print_label(self) -> None:
         cfg = self.conn_panel.config()
         _, rendered = render_label(self.label)
-        problems = warnings_for(rendered)
+        problems, degraded = warnings_for(rendered), degraded_for(rendered)
+        notes = []
         if problems:
+            notes.append("Ces éléments seront remplacés par un cadre barré (aperçu) ou ignorés (mode natif) :\n\n• "
+                         + "\n• ".join(problems))
+        if degraded:
+            notes.append("Les polices internes de l'imprimante ne connaissent que le CP1252 : ces textes "
+                         "perdront des caractères (le mode raster les conserve) :\n\n• "
+                         + "\n• ".join(degraded))
+        if notes:
+            for note in degraded:
+                self.log(f"⚠ {note}")
             r = QMessageBox.warning(
-                self, "Éléments non imprimables",
-                "Ces éléments seront remplacés par un cadre barré (aperçu) ou ignorés (mode natif) :\n\n• "
-                + "\n• ".join(problems) + "\n\nImprimer quand même ?",
+                self, "Éléments non imprimables" if problems else "Caractères non imprimables",
+                "\n\n".join(notes) + "\n\nImprimer quand même ?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if r != QMessageBox.StandardButton.Yes:

@@ -9,6 +9,7 @@ ne pas toucher à la configuration de l'utilisateur.
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -17,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # avant toute création d
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt  # noqa: E402
-from PyQt6.QtGui import QColor, QIcon, QMouseEvent, QPixmap  # noqa: E402
+from PyQt6.QtGui import QColor, QIcon, QKeyEvent, QMouseEvent, QPixmap  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication, QInputDialog, QLabel, QMessageBox, QPushButton, QStyleOptionViewItem, QToolBar, QToolButton,
@@ -35,6 +36,7 @@ from open_thermal_printer.ui.canvas import (  # noqa: E402
 )
 from open_thermal_printer.ui import error_report  # noqa: E402
 from open_thermal_printer.ui.connection_panel import ConnectionPanel  # noqa: E402
+from open_thermal_printer.ui.label_panel import LabelPanel  # noqa: E402
 from open_thermal_printer.ui.main_window import ADD_BUTTON_HEIGHT, GLYPH_SIZE, MainWindow  # noqa: E402
 from open_thermal_printer.ui.pairing_dialog import PairingDialog  # noqa: E402
 
@@ -434,6 +436,95 @@ class MainWindowConnectionTests(unittest.TestCase):
             pump(0.1)
         called.assert_not_called()
         self.assertEqual(self.panel.mac_address(), "AA:BB:CC:DD:EE:FF")
+
+
+class LabelPanelResolutionTests(unittest.TestCase):
+    """Changer de résolution ne doit pas changer la taille physique de l'étiquette."""
+
+    def setUp(self):
+        self.panel = LabelPanel()
+        self.addCleanup(self.panel.deleteLater)
+        self.settings = LabelSettings(width_mm=100.0, height_mm=150.0, dpi=203)
+        self.panel.load(self.settings)
+        self.panel.unit.setCurrentIndex(self.panel.unit.findData("dots"))
+
+    def test_dots_are_rescaled_without_moving_the_label(self):
+        self.assertAlmostEqual(self.panel.width.value(), 799, delta=1)  # 100 mm à 203 dpi
+        self.panel.dpi.setCurrentIndex(self.panel.dpi.findData(300))
+        self.assertAlmostEqual(self.settings.width_mm, 100.0, places=2)
+        self.assertAlmostEqual(self.settings.height_mm, 150.0, places=2)
+        self.assertAlmostEqual(self.panel.width.value(), 1181, delta=1)  # 100 mm à 300 dpi
+
+    def test_millimetres_are_untouched_by_a_resolution_change(self):
+        self.panel.unit.setCurrentIndex(self.panel.unit.findData("mm"))
+        self.panel.dpi.setCurrentIndex(self.panel.dpi.findData(300))
+        self.assertAlmostEqual(self.settings.width_mm, 100.0, places=2)
+        self.assertAlmostEqual(self.panel.width.value(), 100.0, places=1)
+
+
+class ConnectionStartupTests(unittest.TestCase):
+    """La lecture de bluetoothctl ne doit pas retarder l'affichage de la fenêtre."""
+
+    def test_paired_devices_are_listed_outside_the_gui_thread(self):
+        calls = []
+
+        def record():
+            calls.append(threading.current_thread())
+            return []
+
+        with mock.patch.object(printer, "list_paired_devices", side_effect=record), \
+                mock.patch.object(printer, "list_usb_devices", return_value=[]), \
+                mock.patch.object(printer, "list_serial_ports", return_value=[]):
+            panel = ConnectionPanel()
+            self.addCleanup(panel.deleteLater)
+            self.addCleanup(panel.wait_for_background)
+            self.assertEqual(calls, [])  # rien avant que la boucle d'événements ne tourne
+            pump(0.6)
+            self.assertTrue(calls)
+            self.assertIsNot(calls[0], threading.main_thread())
+
+    def test_an_explicit_refresh_stays_synchronous(self):
+        with mock.patch.object(printer, "list_paired_devices",
+                               return_value=[("AA:BB:CC:DD:EE:FF", "PM-241-BT")]), \
+                mock.patch.object(printer, "list_usb_devices", return_value=[]), \
+                mock.patch.object(printer, "list_serial_ports", return_value=[]):
+            panel = ConnectionPanel()
+            self.addCleanup(panel.deleteLater)
+            self.addCleanup(panel.wait_for_background)
+            panel.refresh_devices()
+            self.assertEqual(panel.selected_paired()[0], "AA:BB:CC:DD:EE:FF")
+
+
+class CanvasKeyboardStepTests(unittest.TestCase):
+    """Pas des flèches : 0,5 mm, 2 mm avec Maj — le pas annoncé par le README."""
+
+    def setUp(self):
+        self.canvas = LabelCanvas(templates.shipping_100x150())
+        self.addCleanup(self.canvas.deleteLater)
+        self.canvas.set_grid(5.0, False, False)  # pas libre : aucun alignement sur la grille
+        self.canvas.set_selected(0)
+
+    def press(self, key, modifier=Qt.KeyboardModifier.NoModifier) -> None:
+        self.canvas.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, modifier))
+
+    def test_arrow_moves_by_half_a_millimetre(self):
+        el = self.canvas.label.elements[0]
+        before = el.x
+        self.press(Qt.Key.Key_Right)
+        self.assertAlmostEqual(el.x, before + 0.5, places=6)
+
+    def test_shift_moves_by_two_millimetres(self):
+        el = self.canvas.label.elements[0]
+        before = el.y
+        self.press(Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+        self.assertAlmostEqual(el.y, before + 2.0, places=6)
+
+    def test_grid_snapping_still_follows_its_own_step(self):
+        self.canvas.set_grid(5.0, True, True)
+        el = self.canvas.label.elements[0]
+        el.x, el.y = 10.0, 10.0
+        self.press(Qt.Key.Key_Right)
+        self.assertAlmostEqual(el.x, 15.0, places=6)
 
 
 class CanvasGridTests(unittest.TestCase):

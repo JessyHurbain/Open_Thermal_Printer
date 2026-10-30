@@ -372,9 +372,12 @@ class LabelCanvas(QWidget):
         }
         if e.key() in arrows and 0 <= self.selected < len(self.label.elements):
             coarse = e.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            step = self.grid_mm if self.snap and self.grid_mm > 0 else 0.5
-            if coarse:
-                step *= 5
+            if self.snap and self.grid_mm > 0:
+                # Alignement actif : le pas est celui de la grille, et Maj en fait cinq.
+                step = self.grid_mm * (5 if coarse else 1)
+            else:
+                # Pas libre : 0,5 mm par flèche, 2 mm avec Maj (voir le README).
+                step = 2.0 if coarse else 0.5
             dx, dy = arrows[e.key()]
             el = self.label.elements[self.selected]
             el.x, el.y = self.snap_mm(el.x + dx * step), self.snap_mm(el.y + dy * step)
