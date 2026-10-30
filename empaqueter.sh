@@ -27,7 +27,9 @@ name=OpenThermalPrinter
 stage="open-thermal-printer-$version"
 
 echo "→ Version $version, construction du binaire…"
-rm -rf build dist/"$name" dist/"$stage"
+# Une archive d'une version précédente resterait sinon dans dist/ et finirait en pièce
+# jointe de la release (le workflow attache « dist/*.tar.gz »).
+rm -rf build dist/"$name" dist/"$stage" dist/*.tar.gz dist/SHA256SUMS.txt
 "$py" -m PyInstaller --noconfirm --clean --windowed --name "$name" \
     --icon docs/icons/open-thermal-printer-256.png \
     --collect-binaries pypdfium2 --collect-data pypdfium2 \

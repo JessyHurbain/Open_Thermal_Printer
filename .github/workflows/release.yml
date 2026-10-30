@@ -71,7 +71,7 @@ jobs:
       - name: Somme de contrôle
         run: |
           cd dist
-          sha256sum ./*.tar.gz > SHA256SUMS.txt
+          sha256sum *.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Notes de version
