@@ -112,6 +112,10 @@ Onglet **Connexion** : choisissez Bluetooth (avec la liste des appareils appair�
 
 La même suite tourne à chaque `push` et à chaque pull request via GitHub Actions ([tests.yml](.github/workflows/tests.yml)), sur Python 3.10 et 3.12, sans écran. Le hook local reste utile pour un retour immédiat ; l'intégration continue rattrape les commits faits avec `--no-verify` ou depuis une autre machine.
 
+![Historique des exécutions de la suite, onglet Actions de GitHub](docs/screenshots/ci.png)
+
+Le badge en tête de ce README résume la dernière exécution ; un clic mène à cette page, où chaque `push` figure avec son commit, sa branche et son verdict. La coche verte vaut pour les trois tâches de l'exécution — Python 3.10, Python 3.12 et analyse statique —, et un clic sur une exécution ouvre la sortie complète, tâche par tâche, quand il faut lire l'échec plutôt que le constater.
+
 La CI lance aussi deux vérificateurs statiques (tâche *Analyse statique*) :
 
 ```bash
@@ -133,7 +137,7 @@ Les tests d'interface tournent en mode Qt `offscreen` : aucun serveur graphique,
 ./captures.sh import        # une seule (editeur, element, connexion, import)
 ```
 
-Les captures du tutoriel sont produites **par l'application elle-même**, en Qt `offscreen`, pas fabriquées à la main : un changement d'interface se reflète donc en relançant le script. Il n'exige ni écran ni imprimante — `QSettings` pointe vers un dossier temporaire, la vérification périodique de l'imprimante est neutralisée et l'appareil Bluetooth affiché est fictif (`PM-241-BT`, `AA:BB:CC:DD:EE:FF`). Le bordereau de démonstration de la capture d'import est dessiné par le script : noms, adresses et numéro de suivi y sont inventés.
+Les captures du tutoriel sont produites **par l'application elle-même**, en Qt `offscreen`, pas fabriquées à la main : un changement d'interface se reflète donc en relançant le script. Seule exception, `ci.png`, qui montre l'onglet *Actions* de GitHub : elle se reprend à la main si cette page change d'apparence, le script ne la génère pas. Ce script n'exige ni écran ni imprimante — `QSettings` pointe vers un dossier temporaire, la vérification périodique de l'imprimante est neutralisée et l'appareil Bluetooth affiché est fictif (`PM-241-BT`, `AA:BB:CC:DD:EE:FF`). Le bordereau de démonstration de la capture d'import est dessiné par le script : noms, adresses et numéro de suivi y sont inventés.
 
 ## Imprimer des étiquettes Vinted / Leboncoin
 
