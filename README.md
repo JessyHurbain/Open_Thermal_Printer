@@ -197,6 +197,7 @@ main.py                     point d'entrée
 lancer.sh                   lance l'appli (crée le venv au besoin)
 requirements.txt
 requirements-dev.txt        ruff + mypy épinglés (vérification statique)
+LICENSE                     licence MIT
 pyproject.toml              configuration de ruff et mypy, aucun empaquetage
 open_thermal_printer/
   models.py                 Element / LabelSettings / Label (+ JSON)
@@ -240,3 +241,9 @@ Les messages du panneau *Journal* sont recopiés dans `~/.local/state/open-therm
 - Écrit et testé sans imprimante physique : les trames et l'interface sont vérifiées (tests + rendu), mais le comportement exact de votre PM-241-BT (canal RFCOMM, DIRECTION, réponse au statut) est à confirmer sur le matériel.
 - Si votre exemplaire n'expose pas de service Bluetooth « série » classique (certains modèles Phomemo sont BLE uniquement), utilisez l'USB.
 - En mode natif, les rotations 90/180/270° et le ZPL natif reposent sur les conventions TSC/Zebra : en cas de décalage, le mode raster est exact.
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE). Utilisation, modification et redistribution libres, y compris commerciales, à condition de conserver la mention de copyright et l'avis de licence.
+
+⚠️ Une dépendance n'est pas sous MIT : l'import de PDF s'appuie sur **PyMuPDF**, distribué sous **AGPL-3.0**. Le code du projet reste MIT, mais si vous redistribuez une version qui embarque PyMuPDF (binaire, paquet, image Docker), c'est l'AGPL qui s'applique à l'ensemble et vous devez en fournir les sources. Pour un usage personnel ou interne, aucune conséquence.
