@@ -26,7 +26,8 @@ d'import) ; rien à reconfigurer.
 sudo apt update
 sudo apt install python3-venv python3-pip bluez libxcb-cursor0 libxkbcommon-x11-0 fonts-dejavu-core fontconfig
 
-cd open-thermal-printer
+git clone https://github.com/JessyHurbain/Open_Thermal_Printer.git
+cd Open_Thermal_Printer
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
