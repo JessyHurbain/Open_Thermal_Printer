@@ -75,6 +75,8 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Notes de version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           # Section « ## <version> » de CHANGELOG.md, sans son titre.
@@ -84,10 +86,11 @@ jobs:
             inside { print }
           ' CHANGELOG.md > release-notes.md
           if ! grep -q '[^[:space:]]' release-notes.md; then
+            # Aucune section pour cette version : notes tirées de l'historique des commits.
             echo "Pas de section $version dans CHANGELOG.md : notes générées depuis l'historique."
             gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="${GITHUB_REF_NAME}" --jq .body > release-notes.md
-            printf '\n### Paquet Linux\n\n`OpenThermalPrinter-%s-linux-x86_64.tar.gz` : aucun Python à installer, extrayez l'archive puis lancez `./installer.sh`.\n' \
+            printf "\n### Paquet Linux\n\n\`OpenThermalPrinter-%s-linux-x86_64.tar.gz\` : aucun Python à installer. Extrayez l'archive, puis lancez \`./installer.sh\` pour l'ajouter au menu.\n" \
               "$version" >> release-notes.md
           fi
           cat release-notes.md
